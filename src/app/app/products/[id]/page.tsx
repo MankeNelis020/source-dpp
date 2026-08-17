@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { notFound, useParams } from "next/navigation";
 import {
   claimsForProduct,
@@ -16,6 +17,8 @@ import {
   SourceLabel,
   StatusPill,
 } from "@/components/source/ui";
+import { productBlockers } from "@/domain/source/queries";
+import { useEngineState } from "@/domain/source/store";
 
 const TABS = ["Overview", "Components", "Claims", "Evidence", "History"] as const;
 
@@ -24,9 +27,11 @@ export default function ProductDetailPage() {
   const product = productById(params.id);
   const [tab, setTab] = useState<(typeof TABS)[number]>("Overview");
   const [openClaim, setOpenClaim] = useState<string | null>(null);
+  const engine = useEngineState();
   if (!product) notFound();
   const claims = claimsForProduct(product.id);
   const selected = claims.find((c) => c.id === openClaim);
+  const blockers = productBlockers(engine, product.id);
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -43,8 +48,29 @@ export default function ProductDetailPage() {
             <Mono className="text-[12px] text-[#101A15]/55">READY {product.evidence}%</Mono>
           </div>
         </div>
-        <SourceButton href="/app/requests/new">Request missing data</SourceButton>
+        <SourceButton href={blockers.length ? "/app/missing" : "/app/requests/new"}>
+          {blockers.length ? `Resolve ${blockers.length} blockers` : "Request missing data"}
+        </SourceButton>
       </div>
+
+      {blockers.length ? (
+        <section className="mt-8 border border-[#101A15]/10 bg-[#FBFCFA] p-5">
+          <SourceLabel>What blocks this product?</SourceLabel>
+          <ul className="mt-3 space-y-2">
+            {blockers.map((blocker) => (
+              <li key={blocker.caseId} className="flex flex-wrap items-baseline justify-between gap-2 text-[13px]">
+                <span>
+                  {blocker.property}
+                  <span className="text-[#101A15]/55"> · {blocker.actorLabel}</span>
+                </span>
+                <Link href={`/app/missing/${blocker.caseId}`} className="text-[#101A15]/70 hover:underline">
+                  {(blocker.reason ?? blocker.state).replaceAll("_", " ")}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <div className="mt-8 flex gap-4 border-b border-[#101A15]/10">
         {TABS.map((item) => (

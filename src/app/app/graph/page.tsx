@@ -21,7 +21,10 @@ export default function GraphPage() {
               {c.label}
             </StatusPill>
             {c.id === "textile" ? (
-              <div className="pl-6 text-[#101A15]/45">└── Verified upstream source</div>
+              <div className="pl-6 text-[#101A15]/45">└── Verified upstream source · identity protected</div>
+            ) : null}
+            {c.id === "packaging" ? (
+              <div className="pl-6 text-[#101A15]/45">└── Authorization required before reuse</div>
             ) : null}
           </div>
         ))}

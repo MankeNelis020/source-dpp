@@ -15,8 +15,15 @@ export default function RequestsPage() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Requests"
-        description="Collection can take weeks. Status is a timeline, not a single HTTP call."
-        actions={<SourceButton href="/app/requests/new">New request</SourceButton>}
+        description="A request is one attempt to resolve missing information. The case continues if the mail bounces, the contact is wrong, or the supplier asks upstream."
+        actions={
+          <div className="flex gap-2">
+            <SourceButton href="/app/missing" variant="ghost">
+              Resolution cases
+            </SourceButton>
+            <SourceButton href="/app/requests/new">New request</SourceButton>
+          </div>
+        }
       />
       <SourceTable columns={["Supplier", "Claims", "Sent", "Last activity", "Due", "Status"]}>
         {DEMO_REQUESTS.map((r) => (

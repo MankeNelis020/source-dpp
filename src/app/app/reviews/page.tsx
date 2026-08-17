@@ -4,17 +4,40 @@ import { useState } from "react";
 import { DEMO_EVIDENCE_REVIEWS, DEMO_IDENTITY_REVIEWS } from "@/lib/source/demo-data";
 import { PageHeader } from "@/components/source/page-header";
 import { SourceButton, SourceLabel, StatusPill } from "@/components/source/ui";
+import { useEngineState } from "@/domain/source/store";
 
 export default function ReviewsPage() {
   const [identity, setIdentity] = useState(DEMO_IDENTITY_REVIEWS);
   const [evidence, setEvidence] = useState(DEMO_EVIDENCE_REVIEWS);
+  const engine = useEngineState();
+  const tasks = engine.tasks.filter((t) => t.status === "open");
 
   return (
     <div className="mx-auto max-w-5xl">
       <PageHeader
         title="Reviews"
-        description="Human review is a first-class workflow: fast cards, not a form. SOURCE never auto-merges in doubt."
+        description="Human review is a first-class workflow: fast cards, not a form. SOURCE never auto-merges in doubt. Tasks are action-oriented."
       />
+      {tasks.length ? (
+        <section className="mb-12">
+          <h2 className="font-[family-name:var(--font-space)] text-[20px]">Open tasks</h2>
+          <div className="mt-4 space-y-3">
+            {tasks.map((task) => (
+              <article key={task.id} className="border border-[#101A15]/10 bg-[#FBFCFA] p-5">
+                <SourceLabel>{task.kind}</SourceLabel>
+                <p className="mt-2 text-[14.5px]">{task.title}</p>
+                <p className="mt-1 text-[13px] text-[#101A15]/65">{task.context}</p>
+                <p className="mt-2 text-[13px]">Recommended: {task.recommendedAction}</p>
+                <div className="mt-4">
+                  <SourceButton href={`/app/missing/${task.caseId}`} variant="ghost">
+                    Open case {task.caseId}
+                  </SourceButton>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
       <h2 className="font-[family-name:var(--font-space)] text-[20px]">Identity review</h2>
       <p className="mt-1 text-[13px] text-[#101A15]/60">Are these the same supplier?</p>
       <div className="mt-4 space-y-3">

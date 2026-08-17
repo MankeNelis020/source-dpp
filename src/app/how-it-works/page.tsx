@@ -6,28 +6,28 @@ export const metadata: Metadata = { title: "How it works" };
 const STEPS = [
   {
     n: "01",
-    title: "Connect what you already have",
-    body: "SAP, Dynamics, PIM, PLM, CSV or API. SOURCE imports supplier master, product master, identifiers and BOM relations where they exist.",
+    title: "Detect what is missing",
+    body: "A dataset defines the required claims. SOURCE compares that with trusted data — not with fields that happen to be filled. Expired evidence is missing valid evidence.",
   },
   {
     n: "02",
-    title: "Resolve identities first",
-    body: "Names, VAT, LEI, GTIN, domains and graph context are scored. High confidence matches automatically. Medium goes to review. Low stays unresolved. Nothing is merged in doubt.",
+    title: "Resolve identity, then route",
+    body: "Names, VAT, LEI, GTIN, domains and graph context are scored. High confidence matches automatically. Medium goes to review. SOURCE will not auto-link evidence in doubt.",
   },
   {
     n: "03",
-    title: "Show coverage, not charts",
-    body: "Products imported, supplier relationships, identity resolved, evidence covered, immediately reusable, authorization required, missing claims, expiring evidence.",
+    title: "Reuse before you ask",
+    body: "Existing reusable claims, authorization-only claims, public evidence and active requests are checked first. A new supplier mail is the expensive option.",
   },
   {
     n: "04",
-    title: "Collect only the gaps",
-    body: "A dataset such as ESPR Aluminium 2027 defines required properties. SOURCE groups missing claims per supplier. One request. Magic link. No account wall.",
+    title: "Collect, escalate, travel upstream",
+    body: "No response, bounce, wrong contact and I don't know are normal states. SOURCE reminds, tries another person, or follows the chain — with confidentiality preserved.",
   },
   {
     n: "05",
-    title: "Prove, then permit",
-    body: "AI proposes candidate claims with model version, page and confidence. Humans review. Verified is never set by the model. Reuse requires an auditable grant.",
+    title: "Prove, permit, return, maintain",
+    body: "Evidence is scoped and conflict-checked. Permission is explicit. Ready claims return under output policy. Expiry and revocation start a new cycle. The engine ends at INFORMATION RESOLVED or a explained UNRESOLVED.",
   },
 ];
 
@@ -36,12 +36,12 @@ export default function HowItWorksPage() {
     <div className="mx-auto max-w-3xl px-5 py-16 md:py-24">
       <SourceLabel>How it works</SourceLabel>
       <h1 className="mt-4 font-[family-name:var(--font-space)] text-[40px] font-medium leading-tight tracking-[-0.03em]">
-        The user sees simplicity. SOURCE processes complexity.
+        Detect. Resolve. Collect. Escalate. Prove. Permit. Return. Maintain.
       </h1>
       <p className="mt-4 text-[14.5px] leading-relaxed text-[#101A15]/70">
-        Manufacturers connect, review exceptions, and take action. Suppliers answer, attach
-        evidence, and set permission. Identity, provenance, bitemporality and consent stay
-        underneath.
+        SOURCE is the missing information engine. Manufacturers see what blocks a product. Suppliers
+        can answer, forward, protect a relationship, or say they do not know. Identity, evidence,
+        permission and audit stay underneath.
       </p>
       <ol className="mt-16 space-y-12">
         {STEPS.map((step) => (

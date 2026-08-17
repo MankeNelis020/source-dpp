@@ -116,7 +116,7 @@ export const DEMO_PRODUCTS: DemoProduct[] = [
     sku: "CH-104",
     supplier: "Acme",
     identity: "matched",
-    evidence: 81,
+    evidence: 73,
     status: "review",
     gtin: "08712345678901",
     category: "Seating",
