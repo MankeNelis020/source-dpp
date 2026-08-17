@@ -1,0 +1,39 @@
+---
+description: SOURCE v3 product and engineering direction. Apply before any architecture, domain, security, pricing, or scope change.
+alwaysApply: true
+---
+
+# SOURCE direction v3.0
+
+Canonical document: `docs/SOURCE-PRODUCT-ENGINEERING-DIRECTION-v3.md`
+
+SOURCE is **The Missing Information Engine**. Promise: we find what's missing, then we resolve it. DPP is the first urgent use-case, not the product ceiling.
+
+Do not interpret the direction doc as permission to implement every section. Audit sections 12–20 and 33–40 first. Preserve prototype acceptance-test semantics. No unrelated features.
+
+## Frozen
+
+- Domain: InformationRequirement → ResolutionCase → ResolutionAttempt(s) → Readiness Gates
+- READY requires IDENTITY, VALUE, EVIDENCE, SCOPE, VALIDITY, PERMISSION, CONFLICT
+- Never ask a supplier for information SOURCE can already resolve
+- Server-side authz, capability tokens, confidentiality policies
+- Canonical identity before any propagation; search then evaluate, never copy claims across tenants
+- React consumes the engine; it does not own business truth
+
+## Hypotheses (do not freeze)
+
+- Stripe is the source of list prices and entitlements. Do not hardcode €99/€249/€599/€999 as truth.
+- First vertical (industrial / construction / furniture) is a research priority, not a proven market.
+- GO/PIVOT/KILL percentages are an internal rubric after real manufacturer pilots.
+
+## Build now (P0)
+
+Security boundary, persistence, supplier capability tokens, idempotency, readiness invariants, canonical identity, resolution propagation, event/audit log, seed/test isolation.
+
+## Do not build
+
+Blockchain, complex graphs, generic PIM/PLM, DPP designer, marketplace, ESG dashboard, dozens of regulations, 10 ERP connectors, mobile app, AI chatbot, Supplier Pro, marketing site as engine substitute.
+
+Priority: Security boundary → persistence → idempotency → invariants → canonical identity → resolution propagation → readiness scan → resolution planner.
+
+Goal of this phase: a production-safe resolution engine that can prove or falsify autonomous information resolution with real manufacturer data. Not a production DPP SaaS.

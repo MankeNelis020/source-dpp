@@ -1,8 +1,14 @@
 # SOURCE
 
-Trusted product claims infrastructure. Connect your product system. SOURCE resolves what you have, what is missing, what can be trusted and what may be reused.
+The Missing Information Engine. We find what's missing. Then we resolve it.
 
-This repository is the discovery clickable flow: public site, onboarding, manufacturer workspace, and supplier magic-link portal. Identity resolution, evidence storage, and permission evaluation are demonstrated with the Urban Chair 04 dataset from the product spec — not yet the production engines.
+Canonical product & engineering direction:
+
+**[docs/SOURCE-PRODUCT-ENGINEERING-DIRECTION-v3.md](docs/SOURCE-PRODUCT-ENGINEERING-DIRECTION-v3.md)**
+
+Read that document before changing architecture, domain names, pricing, or scope. Pricing, if shown, comes from Stripe — do not hardcode a price catalogue as source of truth.
+
+This repository currently contains the discovery clickable flow: public site, onboarding, manufacturer workspace, and supplier magic-link portal. Identity resolution, evidence storage, and permission evaluation are demonstrated with demo data — not yet the production engines.
 
 ```bash
 npm install
@@ -18,5 +24,3 @@ Open [http://localhost:3000](http://localhost:3000).
 | `/signup` `/login` `/onboarding` | Organisation flow |
 | `/app` | Manufacturer workspace (demo data) |
 | `/s/demo` | Supplier request (no account wall) |
-
-We never say a claim is true. We show you how it's known.
