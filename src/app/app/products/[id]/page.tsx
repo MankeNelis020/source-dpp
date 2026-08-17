@@ -40,19 +40,19 @@ export default function ProductDetailPage() {
             <StatusPill tone={product.status === "ready" ? "signal" : "attention"}>
               {product.status}
             </StatusPill>
-            <Mono className="text-[12px] text-[#101A15]/55">READY {product.evidence}%</Mono>
+            <Mono className="text-[12px] text-ink/55">READY {product.evidence}%</Mono>
           </div>
         </div>
         <SourceButton href="/app/requests/new">Request missing data</SourceButton>
       </div>
 
-      <div className="mt-8 flex gap-4 border-b border-[#101A15]/10">
+      <div className="mt-8 flex gap-4 border-b border-ink/8">
         {TABS.map((item) => (
           <button
             key={item}
             type="button"
             onClick={() => setTab(item)}
-            className={`pb-2 text-[13px] ${tab === item ? "border-b-2 border-[#0B6E50] text-[#101A15]" : "text-[#101A15]/50"}`}
+            className={`pb-2 text-[13px] ${tab === item ? "border-b-2 border-signal text-ink" : "text-ink/50"}`}
           >
             {item}
           </button>
@@ -66,7 +66,7 @@ export default function ProductDetailPage() {
               <div>{product.name}</div>
               {(product.id === "urban-chair-04" ? URBAN_CHAIR_COMPONENTS : URBAN_CHAIR_COMPONENTS.slice(0, 2)).map(
                 (c) => (
-                  <div key={c.id} className="border-l border-[#101A15]/12 pl-4">
+                  <div key={c.id} className="border-l border-ink/12 pl-4">
                     ├── {c.name}{" "}
                     <StatusPill
                       tone={
@@ -124,7 +124,7 @@ export default function ProductDetailPage() {
           ) : null}
 
           {tab === "History" ? (
-            <ul className="space-y-2 font-[family-name:var(--font-plex)] text-[12px] text-[#101A15]/70">
+            <ul className="space-y-2 font-[family-name:var(--font-plex)] text-[12px] text-ink/70">
               <li>12 Aug · Catalogue sync from products.xlsx</li>
               <li>14 Aug · Identity matched to Acme Manufacturing B.V.</li>
               <li>15 Aug · Claim recycled_content extracted from cert-92831.pdf</li>
@@ -132,7 +132,7 @@ export default function ProductDetailPage() {
           ) : null}
         </div>
 
-        <aside className="space-y-4 border border-[#101A15]/10 bg-[#FBFCFA] p-5">
+        <aside className="space-y-4 border border-ink/8 bg-card p-5">
           {selected ? (
             <>
               <SourceLabel>Claim</SourceLabel>

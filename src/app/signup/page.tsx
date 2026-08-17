@@ -27,7 +27,7 @@ export default function SignupPage() {
     : "Acme Manufacturing B.V.";
 
   return (
-    <div className="mx-auto flex min-h-[70vh] max-w-md flex-col justify-center px-5 py-16">
+    <div className="mx-auto flex min-h-[70vh] max-w-md flex-col justify-center px-6 py-16">
       <SourceWordmark size="lg" />
       <SourceLabel className="mt-10">Step {step} of 4</SourceLabel>
       <h1 className="mt-3 font-[family-name:var(--font-space)] text-[28px] font-medium tracking-[-0.02em]">
@@ -47,7 +47,7 @@ export default function SignupPage() {
         >
           <Field label="Work email" type="email" value={email} onChange={setEmail} required />
           <Field label="Password" type="password" value={password} onChange={setPassword} required />
-          <p className="text-[12px] text-[#101A15]/50">Minimum 8 characters.</p>
+          <p className="text-[12px] text-ink/50">Minimum 8 characters.</p>
           <SourceButton type="submit" className="w-full">
             Continue
           </SourceButton>
@@ -56,8 +56,8 @@ export default function SignupPage() {
 
       {step === 2 ? (
         <div className="mt-8">
-          <p className="text-[14.5px] leading-relaxed text-[#101A15]/70">
-            We sent a verification to <span className="text-[#101A15]">{email}</span>. For this
+          <p className="text-[14.5px] leading-relaxed text-ink/70">
+            We sent a verification to <span className="text-ink">{email}</span>. For this
             discovery build, continue without leaving the page.
           </p>
           <SourceButton className="mt-6 w-full" onClick={() => setStep(3)}>
@@ -86,17 +86,17 @@ export default function SignupPage() {
 
       {step === 4 ? (
         <div className="mt-8">
-          <p className="text-[13px] text-[#101A15]/60">
+          <p className="text-[13px] text-ink/60">
             SOURCE tries to recognise the legal entity. This is the first meeting with identity
             resolution.
           </p>
-          <div className="mt-6 border border-[#101A15]/10 bg-[#FBFCFA] p-5">
+          <div className="mt-6 border border-ink/8 bg-card p-5">
             <SourceLabel>We found</SourceLabel>
             <div className="mt-2 font-[family-name:var(--font-space)] text-[20px] tracking-[-0.02em]">
               {guessedLegal}
             </div>
             <EvidenceLine />
-            <p className="mt-3 font-[family-name:var(--font-plex)] text-[12px] text-[#101A15]/65">
+            <p className="mt-3 font-[family-name:var(--font-plex)] text-[12px] text-ink/65">
               KVK · to be confirmed
               <br />
               VAT · to be confirmed
@@ -129,7 +129,7 @@ export default function SignupPage() {
           </SourceButton>
           <button
             type="button"
-            className="mt-3 w-full text-center text-[13px] text-[#101A15]/55"
+            className="mt-3 w-full text-center text-[13px] text-ink/55"
             onClick={() => setStep(3)}
           >
             This isn&apos;t us
@@ -137,9 +137,9 @@ export default function SignupPage() {
         </div>
       ) : null}
 
-      <p className="mt-8 text-center text-[13px] text-[#101A15]/60">
+      <p className="mt-8 text-center text-[13px] text-ink/60">
         Already have an account?{" "}
-        <Link href="/login" className="text-[#101A15] underline-offset-4 hover:underline">
+        <Link href="/login" className="text-ink underline-offset-4 hover:underline">
           Sign in
         </Link>
       </p>
@@ -169,7 +169,7 @@ function Field({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         minLength={type === "password" ? 8 : undefined}
-        className="mt-2 w-full rounded-sm border border-[#101A15]/15 bg-[#FBFCFA] px-3 py-2.5 text-[13px] outline-none focus:border-[#0B6E50]"
+        className="mt-2 w-full border border-ink/15 bg-card px-3 py-2.5 text-[13px] outline-none focus:border-signal"
       />
     </label>
   );

@@ -22,9 +22,9 @@ export function HeroGraph() {
   }, []);
 
   return (
-    <div className="border border-[#101A15]/10 bg-[#FBFCFA] p-6">
+    <div className="border border-ink/8 bg-card p-6">
       <SourceLabel>SOURCE Graph</SourceLabel>
-      <div className="mt-5 font-[family-name:var(--font-plex)] text-[13px] leading-7 text-[#101A15]">
+      <div className="mt-5 font-[family-name:var(--font-plex)] text-[13px] leading-7 text-ink">
         <div className={cn("transition-opacity duration-700", visible.root ? "opacity-100" : "opacity-0")}>
           Urban Chair 04
         </div>
@@ -36,7 +36,7 @@ export function HeroGraph() {
           </div>
         </Node>
         <Node show={!!visible.textile} label="Textile">
-          <div className="pl-6 text-[#101A15]/55">
+          <div className="pl-6 text-ink/55">
             Missing origin
             <EvidenceLine missing className="w-16" />
           </div>
@@ -63,11 +63,11 @@ function Node({
   return (
     <div
       className={cn(
-        "mt-3 border-l border-[#101A15]/15 pl-4 transition-all duration-700",
+        "mt-3 border-l border-ink/15 pl-4 transition-all duration-700",
         show ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0"
       )}
     >
-      <div className="text-[#101A15]/80">├── {label}</div>
+      <div className="text-ink/80">├── {label}</div>
       <div className="mt-1">{children}</div>
     </div>
   );

@@ -11,7 +11,7 @@ export default function ExportsPage() {
       <ul className="space-y-2 text-[13px]">
         {["Products", "Actors", "Claims", "Evidence metadata", "Permissions", "Audit history"].map(
           (item) => (
-            <li key={item} className="border-b border-[#101A15]/8 py-3">
+            <li key={item} className="border-b border-ink/8 py-3">
               {item}
             </li>
           )

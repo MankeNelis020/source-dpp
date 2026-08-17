@@ -5,12 +5,12 @@ export const metadata: Metadata = { title: "Product" };
 
 export default function ProductPage() {
   return (
-    <div className="mx-auto max-w-6xl px-5 py-16 md:py-24">
+    <div className="mx-auto max-w-6xl px-6 py-16 md:py-24">
       <SourceLabel>Product</SourceLabel>
-      <h1 className="mt-4 max-w-2xl font-[family-name:var(--font-space)] text-[40px] font-medium leading-tight tracking-[-0.03em] md:text-[48px]">
+      <h1 className="mt-4 max-w-2xl font-[family-name:var(--font-space)] text-[40px] font-medium leading-[1.08] tracking-[-0.02em] md:text-[48px]">
         One workflow. Not a feature list.
       </h1>
-      <p className="mt-4 max-w-xl text-[14.5px] leading-relaxed text-[#101A15]/70">
+      <p className="mt-4 max-w-xl text-[14.5px] leading-relaxed text-ink/70">
         A manufacturer should not feel they are building a supply-chain database. They should feel:
         I connect my existing administration. SOURCE tells me what we know, what is missing, and who
         to ask.
@@ -52,8 +52,9 @@ function FlowCol({
   accent?: boolean;
 }) {
   return (
-    <div className={accent ? "border border-[#0B6E50]/30 bg-[#FBFCFA] p-6" : "border border-[#101A15]/10 bg-[#FBFCFA] p-6"}>
+    <div className="border border-ink/8 bg-card p-6">
       <SourceLabel>{title}</SourceLabel>
+      {accent ? <EvidenceLine className="mt-2" /> : null}
       <ul className="mt-4 space-y-2 font-[family-name:var(--font-plex)] text-[13px]">
         {items.map((item) => (
           <li key={item}>{item}</li>
@@ -70,7 +71,7 @@ function Module({ title, body }: { title: string; body: string }) {
       <h2 className="mt-4 font-[family-name:var(--font-space)] text-[20px] tracking-[-0.02em]">
         {title}
       </h2>
-      <p className="mt-2 text-[13px] leading-relaxed text-[#101A15]/70">{body}</p>
+      <p className="mt-2 text-[13px] leading-relaxed text-ink/70">{body}</p>
     </article>
   );
 }

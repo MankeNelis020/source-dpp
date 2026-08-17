@@ -7,10 +7,10 @@ export const SOURCE_COLORS = {
   card: "#FBFCFA",
   attention: "#B26B2C",
   l0: "#AEB4AF",
-  l1: "#7E8A72",
+  l1: "#7E8A92",
   l2: "#2E7E8C",
   l3: "#0B6E50",
-  l4: "#0A4D40",
+  l4: "#064D39",
 } as const;
 
 export const SOURCE_FONTS = ["Space Grotesk", "Inter", "IBM Plex Mono"] as const;
@@ -46,8 +46,11 @@ export const SOURCE_VISUAL_STYLE = {
   ctaStyle: "square" as const,
   contentAlign: "left" as const,
   websiteUrl: "https://source.eu",
+  wordmarkLift: "0.21em",
+  minDigitalWidth: "96px",
+  minPrintWidth: "22mm",
   styleNotes:
-    "Ink-on-paper. No stock photos, no logo walls. Signal green (#0B6E50) only for verified or active states — never decorative. Every verified value gets the evidence line underneath; if evidence is missing, the line is missing. All identifiers, values, status labels and units in IBM Plex Mono. Headlines in Space Grotesk with −2% tracking, sentence case. Labels: mono, uppercase, +14% tracking. Paper 70 / Ink 22 / Signal 8. Calm, infrastructural, precise.",
+    "Ink-on-paper, Swiss grid, square geometry. No stock photos, no logo walls. Signal green (#0B6E50) only for verified or active states — never decorative. Wordmark is unicase lowercase: s/r/c/e on the baseline, o/u lifted 0.21em to the cap-line, evidence-line under ou. Never use the wordmark without the evidence-line. Every verified value gets the evidence line underneath; if evidence is missing, the line is missing. Identifiers, values, status labels and units in IBM Plex Mono. Headlines in Space Grotesk with −2% tracking, sentence case. Labels: mono, uppercase, +14% tracking. Paper 70 / Ink 22 / Signal 8. Calm, infrastructural, precise.",
 };
 
 export const PUBLIC_NAV = [

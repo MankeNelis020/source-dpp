@@ -37,7 +37,7 @@ export default async function EvidenceDetailPage({
         <div>
           <SourceLabel>Linked claims</SourceLabel>
           <ul className="mt-2 space-y-1 text-[13px]">
-            {claims.length === 0 ? <li className="text-[#101A15]/50">None yet</li> : null}
+            {claims.length === 0 ? <li className="text-ink/50">None yet</li> : null}
             {claims.map((c) => (
               <li key={c.id}>
                 {c.property} · {c.value}

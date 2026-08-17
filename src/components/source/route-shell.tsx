@@ -12,7 +12,7 @@ export function RouteShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "/";
   if (isWorkspace(pathname)) {
     if (pathname.startsWith("/s/")) {
-      return <div className="source-theme min-h-full bg-[#EFF2ED] text-[#101A15]">{children}</div>;
+      return <div className="source-theme min-h-full text-ink">{children}</div>;
     }
     return <WorkspaceShell>{children}</WorkspaceShell>;
   }

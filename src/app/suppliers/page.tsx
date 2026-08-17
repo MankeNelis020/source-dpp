@@ -5,16 +5,16 @@ export const metadata: Metadata = { title: "For suppliers" };
 
 export default function SuppliersPage() {
   return (
-    <div className="mx-auto max-w-6xl px-5 py-16 md:py-24">
+    <div className="mx-auto max-w-6xl px-6 py-16 md:py-24">
       <div className="grid gap-12 md:grid-cols-2 md:items-center">
         <div>
           <SourceLabel>For suppliers</SourceLabel>
-          <h1 className="mt-4 font-[family-name:var(--font-space)] text-[40px] font-medium leading-tight tracking-[-0.03em] md:text-[48px]">
+          <h1 className="mt-4 font-[family-name:var(--font-space)] text-[40px] font-medium leading-[1.08] tracking-[-0.02em] md:text-[48px]">
             Answer once.
             <br />
             Stay in control.
           </h1>
-          <p className="mt-4 text-[14.5px] leading-relaxed text-[#101A15]/70">
+          <p className="mt-4 text-[14.5px] leading-relaxed text-ink/70">
             When customers request product information through SOURCE, you decide what you provide
             and how it may be reused. This is not a sales site. It should feel like it saves you work.
           </p>
@@ -37,12 +37,12 @@ export default function SuppliersPage() {
         )}
       </div>
 
-      <div className="mt-16 border border-[#101A15]/10 bg-[#FBFCFA] p-8">
+      <div className="mt-16 border border-ink/8 bg-card p-8">
         <EvidenceLine />
         <h2 className="mt-4 font-[family-name:var(--font-space)] text-[20px]">
           No implementation required
         </h2>
-        <p className="mt-2 max-w-xl text-[13px] leading-relaxed text-[#101A15]/70">
+        <p className="mt-2 max-w-xl text-[13px] leading-relaxed text-ink/70">
           A scoped magic link is enough. You see only the requested claims, upload evidence, and
           choose who may reuse it. Create a free account afterwards if you want to reuse evidence
           next time — never before you have answered.

@@ -30,6 +30,10 @@ export const metadata: Metadata = {
     "The evidence layer for product data. Connect your product system. SOURCE resolves what you have, what is missing, what can be trusted and what may be reused.",
 };
 
+export const viewport = {
+  themeColor: "#EFF2ED",
+};
+
 export default function RootLayout({
   children,
 }: {

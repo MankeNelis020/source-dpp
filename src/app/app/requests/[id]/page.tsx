@@ -18,7 +18,7 @@ export default async function RequestDetailPage({
       <h1 className="mt-2 font-[family-name:var(--font-space)] text-[33px] font-medium tracking-[-0.02em]">
         {request.supplierName}
       </h1>
-      <p className="mt-2 text-[13px] text-[#101A15]/65">
+      <p className="mt-2 text-[13px] text-ink/65">
         Requested {request.sent} · Due {request.due}
       </p>
       <div className="mt-3">
@@ -31,14 +31,14 @@ export default async function RequestDetailPage({
         <div className="mt-2 font-[family-name:var(--font-plex)] text-[22px]">
           {request.complete} / {request.claimsRequested} complete
         </div>
-        <div className="mt-3 h-1.5 bg-[#101A15]/8">
-          <div className="h-full bg-[#0B6E50]" style={{ width: `${pct}%` }} />
+        <div className="mt-3 h-1.5 bg-ink/8">
+          <div className="h-full bg-signal" style={{ width: `${pct}%` }} />
         </div>
       </div>
       <ol className="mt-10 space-y-3">
         {request.timeline.map((item) => (
           <li key={item.date + item.event} className="flex gap-4 text-[13px]">
-            <span className="w-16 font-[family-name:var(--font-plex)] text-[12px] text-[#101A15]/50">
+            <span className="w-16 font-[family-name:var(--font-plex)] text-[12px] text-ink/50">
               {item.date}
             </span>
             <span>{item.event}</span>

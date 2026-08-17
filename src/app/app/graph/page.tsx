@@ -9,11 +9,11 @@ export default function GraphPage() {
         title="Graph"
         description="Not the default interface. Useful for analysis. Permissions decide what is visible — a shielded upstream supplier appears as a verified upstream source, not a company name."
       />
-      <div className="border border-[#101A15]/10 bg-[#FBFCFA] p-8 font-[family-name:var(--font-plex)] text-[13px] leading-8">
+      <div className="border border-ink/8 bg-card p-8 font-[family-name:var(--font-plex)] text-[13px] leading-8">
         <div>Urban Chair 04</div>
-        <div className="text-[#101A15]/50">↓ Product · Components · Suppliers · Materials · Claims · Evidence</div>
+        <div className="text-ink/50">↓ Product · Components · Suppliers · Materials · Claims · Evidence</div>
         {URBAN_CHAIR_COMPONENTS.map((c) => (
-          <div key={c.id} className="border-l border-[#101A15]/12 pl-4">
+          <div key={c.id} className="border-l border-ink/12 pl-4">
             ├── {c.name}{" "}
             <StatusPill
               tone={c.status === "ready" ? "signal" : c.status === "missing" ? "attention" : "teal"}
@@ -21,7 +21,7 @@ export default function GraphPage() {
               {c.label}
             </StatusPill>
             {c.id === "textile" ? (
-              <div className="pl-6 text-[#101A15]/45">└── Verified upstream source</div>
+              <div className="pl-6 text-ink/45">└── Verified upstream source</div>
             ) : null}
           </div>
         ))}

@@ -17,7 +17,7 @@ export default async function SupplierDetailPage({
       <h1 className="mt-2 font-[family-name:var(--font-space)] text-[33px] font-medium tracking-[-0.02em]">
         {supplier.name}
       </h1>
-      <p className="mt-2 text-[13px] text-[#101A15]/65">
+      <p className="mt-2 text-[13px] text-ink/65">
         Matched to {supplier.legalName} · Identity confidence {supplier.identityConfidence}%
       </p>
       <div className="mt-3">
@@ -31,7 +31,7 @@ export default async function SupplierDetailPage({
         <Metric value={String(supplier.missing)} label="Missing claims" />
         <Metric value="6" label="Evidence items expiring" />
       </div>
-      <p className="mt-8 max-w-xl text-[13px] text-[#101A15]/70">
+      <p className="mt-8 max-w-xl text-[13px] text-ink/70">
         {supplier.name} has {supplier.missing} missing claims across 18 product families. SOURCE
         will request the gaps in one collection — not {supplier.products} individual mails.
       </p>

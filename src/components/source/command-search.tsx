@@ -55,18 +55,18 @@ export function CommandSearch() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex h-8 w-full max-w-xs items-center justify-between rounded-sm border border-[#101A15]/10 bg-[#FBFCFA] px-3 text-left text-[12px] text-[#101A15]/45"
+        className="flex h-8 w-full max-w-xs items-center justify-between border border-ink/10 bg-card px-3 text-left text-[12px] text-ink/45"
       >
         <span>Search product, SKU, VAT…</span>
         <span className="font-[family-name:var(--font-plex)] text-[10px]">⌘K</span>
       </button>
       {open ? (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-[#101A15]/25 pt-[12vh]"
+          className="fixed inset-0 z-50 flex items-start justify-center bg-ink/25 pt-[12vh]"
           onClick={() => setOpen(false)}
         >
           <div
-            className="w-full max-w-lg border border-[#101A15]/10 bg-[#FBFCFA] shadow-sm"
+            className="w-full max-w-lg border border-ink/10 bg-card shadow-sm"
             onClick={(e) => e.stopPropagation()}
           >
             <input
@@ -74,14 +74,14 @@ export function CommandSearch() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Product, SKU, GTIN, supplier, VAT, evidence…"
-              className="w-full border-b border-[#101A15]/10 bg-transparent px-4 py-3 text-[14px] outline-none"
+              className="w-full border-b border-ink/10 bg-transparent px-4 py-3 text-[14px] outline-none"
             />
             <ul className="max-h-80 overflow-y-auto py-2">
               {results.map((item) => (
                 <li key={item.href + item.label}>
                   <button
                     type="button"
-                    className="flex w-full items-center justify-between px-4 py-2 text-left text-[13px] hover:bg-[#EFF2ED]"
+                    className="flex w-full items-center justify-between px-4 py-2 text-left text-[13px] hover:bg-paper"
                     onClick={() => {
                       setOpen(false);
                       router.push(item.href);
@@ -93,7 +93,7 @@ export function CommandSearch() {
                 </li>
               ))}
               {results.length === 0 ? (
-                <li className="px-4 py-6 text-[13px] text-[#101A15]/50">No matches.</li>
+                <li className="px-4 py-6 text-[13px] text-ink/50">No matches.</li>
               ) : null}
             </ul>
           </div>

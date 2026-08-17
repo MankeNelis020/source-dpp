@@ -12,12 +12,54 @@ export function SourceLabel({
   return (
     <span
       className={cn(
-        "font-[family-name:var(--font-plex)] text-[10px] font-medium uppercase tracking-[0.14em] text-[#101A15]/55",
+        "font-[family-name:var(--font-plex)] text-[10px] font-medium uppercase tracking-[0.14em] text-ink/55",
         className
       )}
     >
       {children}
     </span>
+  );
+}
+
+export function Display({
+  as: Comp = "h1",
+  size = "lg",
+  children,
+  className,
+}: {
+  as?: "h1" | "h2" | "h3" | "p";
+  size?: "sm" | "md" | "lg" | "xl";
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const sizes = {
+    sm: "text-[20px] leading-snug",
+    md: "text-[28px] leading-[1.12] md:text-[33px]",
+    lg: "text-[40px] leading-[1.08] md:text-[48px]",
+    xl: "text-[40px] leading-[1.05] md:text-[64px]",
+  };
+  return (
+    <Comp
+      className={cn(
+        "font-[family-name:var(--font-space)] font-medium tracking-[-0.02em] text-ink",
+        sizes[size],
+        className
+      )}
+    >
+      {children}
+    </Comp>
+  );
+}
+
+export function SourceCard({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn("border border-ink/8 bg-card", className)}>{children}</div>
   );
 }
 
@@ -32,8 +74,8 @@ export function EvidenceLine({
     <span
       aria-hidden
       className={cn(
-        "mt-1 block h-[2px] w-10 rounded-full",
-        missing ? "bg-[#AEB4AF]/70" : "bg-[#0B6E50]",
+        "mt-1 block h-[2.5px] w-10",
+        missing ? "bg-l0/70" : "bg-signal",
         className
       )}
     />
@@ -71,16 +113,16 @@ export function StatusPill({
   children: React.ReactNode;
 }) {
   const tones = {
-    neutral: "bg-[#101A15]/6 text-[#101A15]",
-    signal: "bg-[#0B6E50]/10 text-[#0B6E50]",
-    attention: "bg-[#B26B2C]/12 text-[#B26B2C]",
-    muted: "bg-[#AEB4AF]/25 text-[#101A15]/70",
-    teal: "bg-[#2E7E8C]/12 text-[#2E7E8C]",
+    neutral: "bg-ink/6 text-ink",
+    signal: "bg-signal/10 text-signal",
+    attention: "bg-attention/12 text-attention",
+    muted: "bg-l0/25 text-ink/70",
+    teal: "bg-l2/12 text-l2",
   };
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-sm px-1.5 py-0.5 font-[family-name:var(--font-plex)] text-[10px] uppercase tracking-[0.12em]",
+        "inline-flex items-center px-1.5 py-0.5 font-[family-name:var(--font-plex)] text-[10px] uppercase tracking-[0.14em]",
         tones[tone]
       )}
     >
@@ -100,12 +142,12 @@ export function Metric({
 }) {
   return (
     <div>
-      <div className="font-[family-name:var(--font-plex)] text-[28px] leading-none tracking-tight text-[#101A15] md:text-[32px]">
+      <div className="font-[family-name:var(--font-plex)] text-[28px] leading-none tracking-tight text-ink md:text-[32px]">
         {value}
       </div>
       <EvidenceLine className="w-8" />
       <SourceLabel className="mt-3 block">{label}</SourceLabel>
-      {hint ? <p className="mt-1 text-[12px] text-[#101A15]/55">{hint}</p> : null}
+      {hint ? <p className="mt-1 text-[12px] text-ink/55">{hint}</p> : null}
     </div>
   );
 }
@@ -132,24 +174,19 @@ export function ClaimCard({
   className?: string;
 }) {
   return (
-    <article
-      className={cn(
-        "border border-[#101A15]/10 bg-[#FBFCFA] p-5 shadow-[0_1px_0_rgba(16,26,21,0.04)]",
-        className
-      )}
-    >
+    <article className={cn("border border-ink/8 bg-card p-6", className)}>
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="font-[family-name:var(--font-space)] text-[40px] font-medium leading-none tracking-[-0.03em] text-[#101A15]">
+          <div className="font-[family-name:var(--font-space)] text-[40px] font-medium leading-none tracking-[-0.02em] text-ink">
             {value}
           </div>
           <EvidenceLine missing={!verified} className="w-16" />
         </div>
         <StatusPill tone={verified ? "signal" : "muted"}>
-          {verified ? `✓ Verified · id ${identity}` : "Declared"}
+          {verified ? `Verified · id ${identity}` : "Declared"}
         </StatusPill>
       </div>
-      <dl className="mt-5 space-y-1.5 font-[family-name:var(--font-plex)] text-[11px] leading-relaxed text-[#101A15]/80">
+      <dl className="mt-6 space-y-1.5 font-[family-name:var(--font-plex)] text-[11px] leading-relaxed text-ink/80">
         <Row k="subject" v={subject} />
         <Row k="property" v={property} />
         <Row k="issuer" v={issuer} />
@@ -163,7 +200,7 @@ export function ClaimCard({
 function Row({ k, v }: { k: string; v: string }) {
   return (
     <div className="grid grid-cols-[88px_1fr] gap-3">
-      <dt className="text-[#101A15]/45">{k}</dt>
+      <dt className="text-ink/45">{k}</dt>
       <dd>{v}</dd>
     </div>
   );
@@ -177,21 +214,29 @@ export function ConfidenceLadder({ active }: { active?: ConfidenceLevel }) {
         return (
           <li key={item.level} className="flex items-center gap-3">
             <span
-              className="h-2 w-2 rounded-full"
-              style={{ background: item.color, opacity: on || active === undefined ? 1 : 0.35 }}
+              className="h-2.5 w-2.5 shrink-0"
+              style={{
+                background: item.color,
+                opacity: on || active === undefined ? 1 : 0.35,
+              }}
             />
-            <Mono
-              className={cn(
-                "text-[11px]",
-                on ? "text-[#101A15]" : "text-[#101A15]/55"
-              )}
-            >
+            <Mono className={cn("text-[11px]", on ? "text-ink" : "text-ink/55")}>
               L{item.level} · {item.label}
             </Mono>
           </li>
         );
       })}
     </ol>
+  );
+}
+
+export function ConfidenceRamp({ className }: { className?: string }) {
+  return (
+    <div className={cn("flex h-1.5 w-full", className)} aria-hidden>
+      {CONFIDENCE_LEVELS.map((item) => (
+        <div key={item.level} className="flex-1" style={{ background: item.color }} />
+      ))}
+    </div>
   );
 }
 
@@ -211,15 +256,12 @@ export function SourceButton({
   onClick?: () => void;
 }) {
   const styles = {
-    primary:
-      "bg-[#101A15] text-[#FBFCFA] hover:bg-[#101A15]/90",
-    ghost:
-      "bg-transparent text-[#101A15] ring-1 ring-inset ring-[#101A15]/15 hover:bg-[#101A15]/5",
-    signal:
-      "bg-[#0B6E50] text-[#FBFCFA] hover:bg-[#0B6E50]/90",
+    primary: "bg-ink text-card hover:bg-ink/90",
+    ghost: "bg-transparent text-ink ring-1 ring-inset ring-ink/15 hover:bg-ink/5",
+    signal: "bg-signal text-card hover:bg-signal/90",
   };
   const cls = cn(
-    "inline-flex items-center justify-center gap-2 rounded-sm px-4 py-2.5 text-[13px] font-medium transition-colors",
+    "inline-flex items-center justify-center gap-2 px-4 py-2.5 text-[13px] font-medium transition-colors",
     styles[variant],
     className
   );
@@ -245,10 +287,10 @@ export function SourceTable({
   children: React.ReactNode;
 }) {
   return (
-    <div className="overflow-x-auto border border-[#101A15]/10 bg-[#FBFCFA]">
+    <div className="overflow-x-auto border border-ink/8 bg-card">
       <table className="w-full min-w-[640px] text-left text-[13px]">
         <thead>
-          <tr className="border-b border-[#101A15]/10">
+          <tr className="border-b border-ink/8">
             {columns.map((col) => (
               <th key={col} className="px-4 py-3">
                 <SourceLabel>{col}</SourceLabel>

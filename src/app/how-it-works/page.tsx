@@ -33,12 +33,12 @@ const STEPS = [
 
 export default function HowItWorksPage() {
   return (
-    <div className="mx-auto max-w-3xl px-5 py-16 md:py-24">
+    <div className="mx-auto max-w-3xl px-6 py-16 md:py-24">
       <SourceLabel>How it works</SourceLabel>
-      <h1 className="mt-4 font-[family-name:var(--font-space)] text-[40px] font-medium leading-tight tracking-[-0.03em]">
+      <h1 className="mt-4 font-[family-name:var(--font-space)] text-[40px] font-medium leading-[1.08] tracking-[-0.02em]">
         The user sees simplicity. SOURCE processes complexity.
       </h1>
-      <p className="mt-4 text-[14.5px] leading-relaxed text-[#101A15]/70">
+      <p className="mt-4 text-[14.5px] leading-relaxed text-ink/70">
         Manufacturers connect, review exceptions, and take action. Suppliers answer, attach
         evidence, and set permission. Identity, provenance, bitemporality and consent stay
         underneath.
@@ -51,7 +51,7 @@ export default function HowItWorksPage() {
               {step.title}
             </h2>
             <EvidenceLine className="mt-3" />
-            <p className="mt-3 text-[13px] leading-relaxed text-[#101A15]/70">{step.body}</p>
+            <p className="mt-3 text-[13px] leading-relaxed text-ink/70">{step.body}</p>
           </li>
         ))}
       </ol>

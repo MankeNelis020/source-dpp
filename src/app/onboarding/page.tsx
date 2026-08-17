@@ -16,14 +16,14 @@ const OPTIONS = [
 export default function OnboardingPage() {
   const router = useRouter();
   return (
-    <div className="mx-auto max-w-2xl px-5 py-16 md:py-24">
+    <div className="mx-auto max-w-2xl px-6 py-16 md:py-24">
       <SourceLabel>Onboarding</SourceLabel>
       <h1 className="mt-4 font-[family-name:var(--font-space)] text-[33px] font-medium tracking-[-0.02em]">
         Welcome to SOURCE.
         <br />
         Let&apos;s start with what you already have.
       </h1>
-      <p className="mt-3 text-[14.5px] text-[#101A15]/70">
+      <p className="mt-3 text-[14.5px] text-ink/70">
         For a pilot, file upload can be prominent. Native ERP connectors come later.
       </p>
       <div className="mt-10 grid gap-3 sm:grid-cols-2">
@@ -32,7 +32,7 @@ export default function OnboardingPage() {
             key={opt.id}
             type="button"
             onClick={() => router.push(opt.id === "api" ? "/developers" : "/app/import")}
-            className="border border-[#101A15]/10 bg-[#FBFCFA] p-5 text-left hover:border-[#0B6E50]/40"
+            className="border border-ink/8 bg-card p-5 text-left hover:border-signal/40"
           >
             <SourceLabel>{opt.group}</SourceLabel>
             <div className="mt-2 font-[family-name:var(--font-space)] text-[20px]">{opt.title}</div>

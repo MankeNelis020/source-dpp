@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { DEMO_COVERAGE } from "@/lib/source/demo-data";
 import { PageHeader } from "@/components/source/page-header";
-import { Metric, SourceButton, SourceLabel, StatusPill } from "@/components/source/ui";
+import { EvidenceLine, Metric, SourceButton, SourceLabel, StatusPill } from "@/components/source/ui";
 
 export default function OverviewPage() {
   const hour = new Date().getHours();
@@ -14,11 +14,14 @@ export default function OverviewPage() {
         description="The homepage answers four questions: what we have, what is missing, where action sits, and what changed. It is not a BI dashboard."
       />
 
-      <section className="border border-[#101A15]/10 bg-[#FBFCFA] p-6">
+      <section className="border border-ink/8 bg-card p-6">
         <SourceLabel>Supply chain coverage</SourceLabel>
-        <div className="mt-3 font-[family-name:var(--font-plex)] text-[40px] leading-none">68%</div>
-        <div className="mt-3 h-1.5 w-full bg-[#101A15]/8">
-          <div className="h-full w-[68%] bg-[#0B6E50]" />
+        <div className="mt-3 font-[family-name:var(--font-plex)] text-[40px] leading-none tracking-tight">
+          68%
+        </div>
+        <EvidenceLine className="w-12" />
+        <div className="mt-4 h-1.5 w-full bg-ink/8">
+          <div className="h-full w-[68%] bg-signal" />
         </div>
         <div className="mt-6 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
           <SmallStat label="Identity resolved" value={`${DEMO_COVERAGE.identityResolved}%`} />
@@ -73,10 +76,10 @@ function Attention({
   tone?: "neutral" | "attention";
 }) {
   return (
-    <Link href={href} className="flex items-center justify-between border border-[#101A15]/10 bg-[#FBFCFA] px-5 py-4 hover:border-[#0B6E50]/40">
+    <Link href={href} className="flex items-center justify-between border border-ink/8 bg-card px-5 py-4 hover:border-signal/40">
       <div>
         <div className="font-[family-name:var(--font-plex)] text-[22px]">{n}</div>
-        <p className="mt-1 text-[13px] text-[#101A15]/65">{label}</p>
+        <p className="mt-1 text-[13px] text-ink/65">{label}</p>
       </div>
       <StatusPill tone={tone}>{tone === "attention" ? "Action" : "Review"}</StatusPill>
     </Link>

@@ -23,12 +23,12 @@ const HOOKS = [
 
 export default function DevelopersPage() {
   return (
-    <div className="mx-auto max-w-3xl px-5 py-16 md:py-24">
+    <div className="mx-auto max-w-3xl px-6 py-16 md:py-24">
       <SourceLabel>Developers</SourceLabel>
-      <h1 className="mt-4 font-[family-name:var(--font-space)] text-[40px] font-medium leading-tight tracking-[-0.03em]">
+      <h1 className="mt-4 font-[family-name:var(--font-space)] text-[40px] font-medium leading-[1.08] tracking-[-0.02em]">
         Open integration. No data lock-in.
       </h1>
-      <p className="mt-4 text-[14.5px] leading-relaxed text-[#101A15]/70">
+      <p className="mt-4 text-[14.5px] leading-relaxed text-ink/70">
         Connectors authenticate, discover, pull, normalize, checkpoint and push. They know nothing
         of SOURCE business rules. They deliver canonical source records; identity, claims and
         permissions live above that.
@@ -58,7 +58,7 @@ export default function DevelopersPage() {
         </ul>
       </div>
 
-      <pre className="mt-12 overflow-x-auto border border-[#101A15]/10 bg-[#FBFCFA] p-5 font-[family-name:var(--font-plex)] text-[12px] leading-relaxed text-[#101A15]/80">
+      <pre className="mt-12 overflow-x-auto border border-ink/8 bg-card p-5 font-[family-name:var(--font-plex)] text-[12px] leading-relaxed text-ink/80">
 {`{
   "claim_id": "clm_9f3a",
   "subject_id": "AL-FRAME-881",

@@ -20,7 +20,7 @@ export default function ImportWizardPage() {
         {STEPS.map((label, i) => (
           <span
             key={label}
-            className={`h-1 flex-1 ${i <= step ? "bg-[#0B6E50]" : "bg-[#101A15]/10"}`}
+            className={`h-1 flex-1 ${i <= step ? "bg-signal" : "bg-ink/10"}`}
           />
         ))}
       </div>
@@ -30,7 +30,7 @@ export default function ImportWizardPage() {
           <p>products.xlsx</p>
           <p>suppliers.xlsx</p>
           <p>bom.xlsx</p>
-          <p className="text-[#101A15]/50">SOURCE analyses the files. Column mapping is proposed; you correct only doubt.</p>
+          <p className="text-ink/50">SOURCE analyses the files. Column mapping is proposed; you correct only doubt.</p>
         </div>
       ) : null}
       {step === 1 ? (

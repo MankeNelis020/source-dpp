@@ -14,7 +14,7 @@ export default function EvidenceLibraryPage() {
         {DEMO_EVIDENCE.map((e) => {
           const supplier = DEMO_SUPPLIERS.find((s) => s.id === e.supplierId);
           return (
-            <tr key={e.id} className="border-t border-[#101A15]/8 hover:bg-[#EFF2ED]/80">
+            <tr key={e.id} className="border-t border-ink/8 hover:bg-paper/80">
               <td className="px-4 py-3">
                 <Link href={`/app/evidence/${e.id}`} className="font-[family-name:var(--font-plex)] text-[12px] hover:underline">
                   {e.filename}
