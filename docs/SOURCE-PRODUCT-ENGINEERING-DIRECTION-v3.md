@@ -47,9 +47,9 @@ Every claim below is tagged. Do not collapse these categories.
 
 ## 0. Current repository fact
 
-**ZEKER.** This repository (`MankeNelis020/source-dpp`) is currently a greenfield checkout: `README.md` only. There is no in-tree engine, no acceptance-test suite, and no persistence layer here yet.
+**ZEKER.** `main` contains a Next.js App Router discovery UI (`src/app`): public site, onboarding, manufacturer workspace, and supplier magic-link portal, driven by in-memory demo data.
 
-That does **not** licence a rewrite from scratch of the domain. The Missing Information Engine prototype (closed `Command` union, readiness gates, resolution cases, attempt chain, escalation policies, cycle detection, unhappy flows, in-memory demo store, React as mutation owner) is the semantic baseline. If that prototype lives on another branch or repo, **import it first**, then migrate. Do not invent a parallel model.
+There is still **no production engine** on `main`: no persistent domain layer, no acceptance-test suite, no server authorization boundary. The Missing Information Engine prototype (closed `Command` union, readiness gates, resolution cases, attempt chain, escalation policies, cycle detection, unhappy flows) lives on `cursor/unhappy-flow-missing-information-a93d` (PR #1). **Merge or import that prototype**, then migrate. Do not invent a parallel model.
 
 Until the prototype is in this tree, P0 items in sections 12–20 and 33 are all open gaps. The preservation rules in sections 3, 4, 11, 16, 35 and 36 still apply.
 
@@ -1151,23 +1151,24 @@ Dat onderscheid is cruciaal.
 
 | Area | Section | Status |
 | --- | --- | --- |
-| Server authorization boundary | 12 | **Missing** — no server, no `EngineState` split |
-| Supplier capability tokens | 13 | **Missing** — no `/s/[token]` to replace yet in this tree |
+| Next.js `src/app` (Vercel build) | — | **Present on `main`** — public + workspace UI |
+| Server authorization boundary | 12 | **Missing** — no server, no `EngineState` split; React still owns demo mutations |
+| Supplier capability tokens | 13 | **UI-only** — `/s/[token]` exists; filtering is not a server capability grant |
 | Confidentiality policies | 14 | **Missing** |
 | Idempotency | 15 | **Missing** |
-| Command authorization | 16 | **Missing** — closed `Command` union not in this tree |
+| Command authorization | 16 | **Missing on `main`** — closed `Command` union is on PR #1 |
 | Event-driven side effects | 17 | **Missing** |
 | Durable workflows | 18 | **Missing** |
-| Persistence | 19 | **Missing** |
+| Persistence | 19 | **Missing** — in-memory / demo data only |
 | Tenant vs network layers | 20 | **Missing** |
-| Readiness invariant tests | 4, 33.6 | **Missing** |
+| Readiness invariant tests | 4, 33.6 | **Missing on `main`** — tests exist on PR #1 |
 | Propagation engine | 7, 33.7 | **Missing** |
-| Canonical identity | 8, 33.8 | **Missing** |
+| Canonical identity | 8, 33.8 | **Missing as infrastructure** |
 | Event/audit persistence | 33.9 | **Missing** |
-| Seed/test isolation | 33.10 | **Missing** |
+| Seed/test isolation | 33.10 | **Missing on `main`** |
 | Security / product / network / UX invariants | 38–41 | **Not encoded** |
 
-**Implication:** the first implementation plan is (1) locate or import the prototype and its acceptance tests, (2) freeze semantics, (3) migrate command-by-command per section 36, in the priority order below. Do not add a marketing site, Stripe-hardcoded pricing, or DPP designer while this table is red.
+**Implication:** the first implementation plan is (1) merge/import PR #1 (prototype + acceptance tests), (2) freeze semantics, (3) migrate command-by-command per section 36, in the priority order below. Do not add a marketing site, Stripe-hardcoded pricing, or DPP designer while this table is red. The Vercel app directory must remain at `src/app` (or `app/`) so `next build` / `npm run vercel-build` can succeed.
 
 **Migration risks to name before coding:**
 
