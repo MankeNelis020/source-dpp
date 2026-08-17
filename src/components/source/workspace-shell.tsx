@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore, useState } from "react";
 import { WORKSPACE_NAV } from "@/lib/source/brand";
 import { DEMO_ORG } from "@/lib/source/demo-data";
-import { clearSession, readSession, type SourceSession } from "@/lib/session";
+import { clearSession, readSession, subscribeSession } from "@/lib/session";
 import { SourceWordmark } from "./wordmark";
 import { Mono, SourceLabel, StatusPill } from "./ui";
 import { cn } from "@/lib/utils";
@@ -15,11 +15,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [session, setSession] = useState<SourceSession | null>(null);
-
-  useEffect(() => {
-    setSession(readSession());
-  }, []);
+  const session = useSyncExternalStore(subscribeSession, readSession, () => null);
 
   return (
     <div className="source-theme flex min-h-full bg-[#EFF2ED] text-[#101A15]">
@@ -60,7 +56,6 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
                 className="text-[11px] text-[#101A15]/50 hover:text-[#101A15]"
                 onClick={() => {
                   clearSession();
-                  setSession(null);
                   router.push("/");
                 }}
               >

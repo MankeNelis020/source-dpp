@@ -45,6 +45,10 @@ export function CommandSearch() {
         label: e.filename,
         href: `/app/evidence/${e.id}`,
       })),
+      { type: "Case", label: "Missing information", href: "/app/missing" },
+      { type: "Case", label: "SRC-184821 Aluminium recycled content", href: "/app/missing/SRC-184821" },
+      { type: "Case", label: "SRC-184830 Textile origin", href: "/app/missing/SRC-184830" },
+      { type: "Case", label: "SRC-184847 Textile conflict", href: "/app/missing/SRC-184847" },
     ];
     if (!query) return items.slice(0, 8);
     return items.filter((i) => i.label.toLowerCase().includes(query)).slice(0, 10);

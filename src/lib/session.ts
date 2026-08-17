@@ -21,10 +21,22 @@ export function readSession(): SourceSession | null {
   }
 }
 
+export function subscribeSession(onStoreChange: () => void) {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener("storage", onStoreChange);
+  window.addEventListener("source-session", onStoreChange);
+  return () => {
+    window.removeEventListener("storage", onStoreChange);
+    window.removeEventListener("source-session", onStoreChange);
+  };
+}
+
 export function writeSession(session: SourceSession) {
   window.localStorage.setItem(KEY, JSON.stringify(session));
+  window.dispatchEvent(new Event("source-session"));
 }
 
 export function clearSession() {
   window.localStorage.removeItem(KEY);
+  window.dispatchEvent(new Event("source-session"));
 }

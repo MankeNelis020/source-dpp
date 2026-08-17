@@ -10,15 +10,22 @@ const ENDPOINTS = [
   "/v1/claims",
   "/v1/evidence",
   "/v1/permissions",
+  "/v1/requirements",
+  "/v1/resolution-cases",
   "/v1/requests",
+  "/v1/claims/:id/readiness",
 ];
 
 const HOOKS = [
-  "claim.updated",
-  "evidence.expiring",
-  "request.completed",
-  "permission.granted",
-  "identity.resolved",
+  "requirement.created",
+  "identity.review_required",
+  "claim.conflict_detected",
+  "request.no_response",
+  "request.forwarded",
+  "evidence.expired",
+  "permission.revoked",
+  "case.ready",
+  "case.unresolved",
 ];
 
 export default function DevelopersPage() {
