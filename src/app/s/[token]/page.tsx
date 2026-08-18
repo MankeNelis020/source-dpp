@@ -12,35 +12,49 @@ type ActionId = (typeof SUPPLIER_ACTIONS)[number]["id"];
 
 interface PortalView {
   requesterName: string;
+  actorId: string;
   allowedCommands: string[];
-  questions: { id: string; version: number; state: string; propertyLabel?: string; subjectLabel?: string; nextAction: string }[];
+  questions: {
+    id: string;
+    version: number;
+    state: string;
+    propertyLabel?: string;
+    subjectLabel?: string;
+    nextAction: string;
+    purpose?: string;
+    requiredBy?: string;
+    productNames?: string[];
+    whyRequested?: string;
+    submitted?: boolean;
+  }[];
 }
 
 export default function SupplierPortalPage() {
   const params = useParams<{ token: string }>();
-  const token = params.token || "demo";
-  const { data, error, reload } = useSourceQuery<PortalView>(`/api/portal/${encodeURIComponent(token)}`);
+  const token = typeof params.token === "string" ? params.token : "";
+  const { data, error, errorCode, reload } = useSourceQuery<PortalView>(token ? `/api/portal/${encodeURIComponent(token)}` : null);
   const runCommand = usePortalCommand(token);
   const questions = useMemo(() => data?.questions ?? [], [data?.questions]);
+  const openQuestions = useMemo(() => questions.filter((q) => !q.submitted && q.state !== "READY"), [questions]);
 
   const [step, setStep] = useState<"land" | "list" | "act" | "done">("land");
   const [caseId, setCaseId] = useState<string | null>(null);
   const [action, setAction] = useState<ActionId | null>(null);
-  const [value, setValue] = useState("67");
+  const [value, setValue] = useState("");
   const [share, setShare] = useState<"GRANTED" | "REQUEST_REQUIRED" | "DENIED">("GRANTED");
   const [unknown, setUnknown] = useState<UnknownChoice>("ask_supplier");
   const [upstreamMode, setUpstreamMode] = useState<UpstreamContactMode>("confidential");
-  const [upstreamName, setUpstreamName] = useState("Nordic Fibre Mill");
+  const [upstreamName, setUpstreamName] = useState("");
   const [declineReason, setDeclineReason] = useState<DeclineReason>("commercially_confidential");
-  const [colleague, setColleague] = useState("compliance@suppliera.example");
+  const [colleague, setColleague] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [uploadState, setUploadState] = useState<string | null>(null);
 
   const current = useMemo(
-    () => questions.find((c) => c.id === caseId) ?? questions[0],
-    [questions, caseId]
+    () => openQuestions.find((c) => c.id === caseId) ?? openQuestions[0],
+    [openQuestions, caseId]
   );
 
   function finish(text: string) {
@@ -50,7 +64,7 @@ export default function SupplierPortalPage() {
   }
 
   async function run() {
-    if (!current || busy) return;
+    if (!current || busy || !token) return;
     setBusy(true);
     try {
       if (action === "provide" || action === "upload" || action === "existing") {
@@ -84,53 +98,68 @@ export default function SupplierPortalPage() {
         });
         finish(
           action === "provide"
-            ? "Answer saved as declared. If this dataset needs evidence, the case stays open."
-            : "File received. SOURCE will check whether it satisfies the requested information."
+            ? "Answer saved. If this dataset needs evidence, the request stays open."
+            : "File received. SOURCE will check whether it answers this request."
         );
         return;
       }
       if (action === "unknown") {
         await runCommand({ type: "MARK_UNKNOWN", caseId: current.id, choice: unknown });
-        finish("I don't know is a primary SOURCE flow. The case continues with a next owner.");
+        finish("Recorded. SOURCE will continue with the next owner of this answer.");
         return;
       }
       if (action === "upstream") {
+        if (!upstreamName.trim()) {
+          setBusy(false);
+          setMessage("Name the upstream organisation first.");
+          return;
+        }
         await runCommand({ type: "MARK_UNKNOWN", caseId: current.id, choice: "ask_supplier" });
         await runCommand({
           type: "FORWARD_UPSTREAM",
           caseId: current.id,
-          upstream: { name: upstreamName, legalName: upstreamName, country: "Finland" },
+          upstream: { name: upstreamName.trim(), legalName: upstreamName.trim(), country: "Unknown" },
           mode: upstreamMode,
         });
         finish(
           upstreamMode === "confidential"
-            ? "Your customer will not see this upstream identity. The original requirement stays the same."
-            : "SOURCE will ask your supplier. This is a new attempt, not a new requirement."
+            ? "Your customer will not see this upstream identity. The original request stays the same."
+            : "SOURCE will ask your supplier. This continues the same request."
         );
         return;
       }
       if (action === "colleague") {
+        if (!colleague.trim()) {
+          setBusy(false);
+          setMessage("Enter a colleague email first.");
+          return;
+        }
         await runCommand({
           type: "ASSIGN_COLLEAGUE",
           caseId: current.id,
-          contact: { actorId: "supplier-a", role: "compliance", name: "Colleague", email: colleague },
+          contact: { actorId: data?.actorId ?? "", role: "compliance", name: "Colleague", email: colleague.trim() },
         });
-        finish("The same scoped request was forwarded. You remain in the audit history.");
+        finish("The same scoped request was forwarded. You remain in the history.");
         return;
       }
       if (action === "decline") {
         await runCommand({ type: "DECLINE", caseId: current.id, reason: declineReason });
-        finish("Refusal is recorded with a reason. SOURCE decides the next route — this is not a dead end.");
+        finish("Refusal is recorded with a reason. SOURCE decides the next route.");
         return;
       }
       if (action === "wrong") {
+        if (!colleague.trim()) {
+          setBusy(false);
+          setMessage("Enter a better contact email first.");
+          return;
+        }
         await runCommand({
           type: "MARK_WRONG_CONTACT",
           caseId: current.id,
           mode: "provide_contact",
-          contact: { role: "compliance", name: "Colleague", email: colleague },
+          contact: { role: "compliance", name: "Colleague", email: colleague.trim() },
         });
-        finish("Thank you. SOURCE will send the same request to the new person. No new case was created.");
+        finish("Thank you. SOURCE will send the same request to the new person.");
       }
     } catch (err) {
       finish(err instanceof Error ? err.message : "The request could not be completed.");
@@ -139,15 +168,39 @@ export default function SupplierPortalPage() {
     }
   }
 
-  if (error) {
-    const expired = error.includes("expired");
+  if (!token) {
     return (
       <div className="mx-auto min-h-full max-w-lg px-5 py-16">
         <SourceWordmark />
-        <h1 className="mt-10 font-[family-name:var(--font-space)] text-[28px] font-medium">
-          {expired ? "This request link has expired." : "This link is unavailable."}
-        </h1>
+        <h1 className="mt-10 font-[family-name:var(--font-space)] text-[28px] font-medium">This link is unavailable.</h1>
+      </div>
+    );
+  }
+
+  if (error) {
+    const title =
+      errorCode === "EXPIRED"
+        ? "This request link has expired."
+        : errorCode === "REVOKED"
+          ? "This request link has been withdrawn."
+          : "This link is unavailable.";
+    return (
+      <div className="mx-auto min-h-full max-w-lg px-5 py-16">
+        <SourceWordmark />
+        <h1 className="mt-10 font-[family-name:var(--font-space)] text-[28px] font-medium">{title}</h1>
         <p className="mt-3 text-[13px] text-[#101A15]/65">{error}</p>
+      </div>
+    );
+  }
+
+  if (data && questions.length > 0 && openQuestions.length === 0 && step !== "done") {
+    return (
+      <div className="mx-auto min-h-full max-w-lg px-5 py-16">
+        <SourceWordmark />
+        <h1 className="mt-10 font-[family-name:var(--font-space)] text-[28px] font-medium">This request is already answered.</h1>
+        <p className="mt-3 text-[13px] text-[#101A15]/65">
+          {data.requesterName} already has a response on this link. You can close this page.
+        </p>
       </div>
     );
   }
@@ -161,7 +214,7 @@ export default function SupplierPortalPage() {
             {data?.requesterName ?? "A manufacturer"} requests product information.
           </h1>
           <p className="mt-3 text-[13px] text-[#101A15]/65">
-            {questions.length} open questions · You decide what may be reused
+            {openQuestions.length} open question{openQuestions.length === 1 ? "" : "s"} · You decide what may be reused
           </p>
           <p className="mt-6 text-[14.5px] leading-relaxed text-[#101A15]/70">
             If you do not know, cannot share, or are not the right person — that is still a valid answer.
@@ -176,10 +229,10 @@ export default function SupplierPortalPage() {
         <>
           <SourceLabel className="mt-10">Questions</SourceLabel>
           <h1 className="mt-2 font-[family-name:var(--font-space)] text-[24px] tracking-[-0.02em]">
-            What SOURCE still needs
+            What {data?.requesterName ?? "the manufacturer"} still needs
           </h1>
           <ul className="mt-6 space-y-2">
-            {questions.map((item) => (
+            {openQuestions.map((item) => (
               <li key={item.id}>
                 <button
                   type="button"
@@ -200,9 +253,15 @@ export default function SupplierPortalPage() {
 
       {step === "act" && current ? (
         <>
-          <SourceLabel className="mt-10">{current.id}</SourceLabel>
+          <SourceLabel className="mt-10">{data?.requesterName}</SourceLabel>
           <h1 className="mt-2 font-[family-name:var(--font-space)] text-[24px]">{current.propertyLabel}</h1>
           <p className="mt-2 text-[13px] text-[#101A15]/65">{current.subjectLabel}</p>
+          {current.productNames?.length ? (
+            <p className="mt-2 text-[13px] text-[#101A15]/65">Product: {current.productNames.join(", ")}</p>
+          ) : null}
+          {current.whyRequested ? (
+            <p className="mt-4 text-[14.5px] leading-relaxed text-[#101A15]/75">{current.whyRequested}</p>
+          ) : null}
           <div className="mt-6 grid gap-2">
             {SUPPLIER_ACTIONS.map((item) => (
               <button
@@ -256,7 +315,12 @@ export default function SupplierPortalPage() {
           ) : null}
           {action === "upstream" ? (
             <div className="mt-6 space-y-3">
-              <input className="w-full border border-[#101A15]/15 px-3 py-2 text-[13px]" value={upstreamName} onChange={(e) => setUpstreamName(e.target.value)} />
+              <input
+                className="w-full border border-[#101A15]/15 px-3 py-2 text-[13px]"
+                placeholder="Upstream organisation name"
+                value={upstreamName}
+                onChange={(e) => setUpstreamName(e.target.value)}
+              />
               <select className="w-full border border-[#101A15]/15 px-3 py-2 text-[13px]" value={upstreamMode} onChange={(e) => setUpstreamMode(e.target.value as UpstreamContactMode)}>
                 <option value="confidential">Keep my supplier identity protected</option>
                 <option value="on_behalf">Contact them on behalf of my customer</option>
@@ -274,7 +338,12 @@ export default function SupplierPortalPage() {
             </select>
           ) : null}
           {action === "colleague" || action === "wrong" ? (
-            <input className="mt-6 w-full border border-[#101A15]/15 px-3 py-2 text-[13px]" value={colleague} onChange={(e) => setColleague(e.target.value)} />
+            <input
+              className="mt-6 w-full border border-[#101A15]/15 px-3 py-2 text-[13px]"
+              placeholder="colleague@example.com"
+              value={colleague}
+              onChange={(e) => setColleague(e.target.value)}
+            />
           ) : null}
           <SourceButton className="mt-8" onClick={() => void run()} disabled={!action || busy}>
             Continue
@@ -287,10 +356,12 @@ export default function SupplierPortalPage() {
           <h1 className="mt-10 font-[family-name:var(--font-space)] text-[24px]">Received.</h1>
           <EvidenceLine className="mt-4" />
           <p className="mt-4 text-[14.5px] leading-relaxed text-[#101A15]/75">{message}</p>
-          <StatusPill tone="signal">Same requirement · new attempt if needed</StatusPill>
-          <SourceButton className="mt-8" onClick={() => setStep("list")}>
-            Back to questions
-          </SourceButton>
+          <StatusPill tone="signal">Same request · SOURCE continues if more is needed</StatusPill>
+          {openQuestions.length > 1 ? (
+            <SourceButton className="mt-8" onClick={() => setStep("list")}>
+              Back to questions
+            </SourceButton>
+          ) : null}
         </>
       ) : null}
     </div>

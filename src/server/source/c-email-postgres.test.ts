@@ -60,6 +60,8 @@ describe("PR C postgres outbound isolation", () => {
     });
     const aliceRows = await store.listOutboundMessages("alice-mail-pg");
     expect(aliceRows.some((row) => row.recipient === "secret-bob@example.com")).toBe(false);
+    const ids = await store.listOrganisationIds();
+    expect(ids).toEqual(expect.arrayContaining(["alice-mail-pg", "bob-mail-pg"]));
     const client = await app.connect();
     try {
       await client.query("BEGIN");

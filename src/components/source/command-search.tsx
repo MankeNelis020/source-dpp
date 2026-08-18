@@ -2,13 +2,20 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { DEMO_PRODUCTS, DEMO_SUPPLIERS, DEMO_REQUESTS, DEMO_EVIDENCE } from "@/lib/source/demo-data";
 import { SourceLabel } from "./ui";
+import { api } from "@/client/source/api";
+
+interface SearchResult {
+  actors: { id: string; name: string; kind: string }[];
+  subjects: { id: string; name: string; kind: string }[];
+  evidence: { opaqueRef: string; filename: string }[];
+}
 
 export function CommandSearch() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const [result, setResult] = useState<SearchResult | null>(null);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -22,37 +29,42 @@ export function CommandSearch() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const results = useMemo(() => {
-    const query = q.trim().toLowerCase();
-    const items: { type: string; label: string; href: string }[] = [
-      ...DEMO_PRODUCTS.map((p) => ({
-        type: "Product",
-        label: `${p.name} · ${p.sku}`,
-        href: `/app/products/${p.id}`,
+  useEffect(() => {
+    if (!open) return;
+    const handle = window.setTimeout(() => {
+      void api<SearchResult>(`/api/source/search?q=${encodeURIComponent(q)}`)
+        .then(setResult)
+        .catch(() => setResult({ actors: [], subjects: [], evidence: [] }));
+    }, 120);
+    return () => window.clearTimeout(handle);
+  }, [open, q]);
+
+  const items = useMemo(() => {
+    const rows: { type: string; label: string; href: string }[] = [
+      { type: "Page", label: "Upload catalogue", href: "/app/import" },
+      { type: "Page", label: "Missing information", href: "/app/missing" },
+      { type: "Page", label: "Needs you", href: "/app/reviews" },
+      { type: "Page", label: "Results", href: "/app/pilot" },
+      ...(result?.subjects ?? []).map((s) => ({
+        type: s.kind === "PRODUCT" || s.kind === "VARIANT" ? "Product" : "Subject",
+        label: s.name,
+        href: `/app/products/${s.id}`,
       })),
-      ...DEMO_SUPPLIERS.map((s) => ({
+      ...(result?.actors ?? []).map((a) => ({
         type: "Supplier",
-        label: `${s.name} · ${s.vat ?? ""}`,
-        href: `/app/suppliers/${s.id}`,
+        label: a.name,
+        href: `/app/suppliers/${a.id}`,
       })),
-      ...DEMO_REQUESTS.map((r) => ({
-        type: "Request",
-        label: r.supplierName,
-        href: `/app/requests/${r.id}`,
-      })),
-      ...DEMO_EVIDENCE.map((e) => ({
+      ...(result?.evidence ?? []).map((e) => ({
         type: "Evidence",
         label: e.filename,
-        href: `/app/evidence/${e.id}`,
+        href: `/app/evidence/${e.opaqueRef}`,
       })),
-      { type: "Case", label: "Missing information", href: "/app/missing" },
-      { type: "Case", label: "SRC-184821 Aluminium recycled content", href: "/app/missing/SRC-184821" },
-      { type: "Case", label: "SRC-184830 Textile origin", href: "/app/missing/SRC-184830" },
-      { type: "Case", label: "SRC-184847 Textile conflict", href: "/app/missing/SRC-184847" },
     ];
-    if (!query) return items.slice(0, 8);
-    return items.filter((i) => i.label.toLowerCase().includes(query)).slice(0, 10);
-  }, [q]);
+    const query = q.trim().toLowerCase();
+    if (!query) return rows.slice(0, 8);
+    return rows.filter((item) => item.label.toLowerCase().includes(query)).slice(0, 10);
+  }, [q, result]);
 
   return (
     <>
@@ -61,7 +73,7 @@ export function CommandSearch() {
         onClick={() => setOpen(true)}
         className="flex h-8 w-full max-w-xs items-center justify-between rounded-sm border border-[#101A15]/10 bg-[#FBFCFA] px-3 text-left text-[12px] text-[#101A15]/45"
       >
-        <span>Search product, SKU, VAT…</span>
+        <span>Search product, supplier, evidence…</span>
         <span className="font-[family-name:var(--font-plex)] text-[10px]">⌘K</span>
       </button>
       {open ? (
@@ -77,11 +89,11 @@ export function CommandSearch() {
               autoFocus
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Product, SKU, GTIN, supplier, VAT, evidence…"
+              placeholder="Product, supplier, evidence…"
               className="w-full border-b border-[#101A15]/10 bg-transparent px-4 py-3 text-[14px] outline-none"
             />
             <ul className="max-h-80 overflow-y-auto py-2">
-              {results.map((item) => (
+              {items.map((item) => (
                 <li key={item.href + item.label}>
                   <button
                     type="button"
@@ -96,8 +108,8 @@ export function CommandSearch() {
                   </button>
                 </li>
               ))}
-              {results.length === 0 ? (
-                <li className="px-4 py-6 text-[13px] text-[#101A15]/50">No matches.</li>
+              {items.length === 0 ? (
+                <li className="px-4 py-6 text-[13px] text-[#101A15]/50">No matches in this workspace.</li>
               ) : null}
             </ul>
           </div>

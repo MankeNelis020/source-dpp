@@ -117,7 +117,21 @@ export interface PortalPrincipal {
   allowedCommands: PortalCommand[];
 }
 
-export type AnyPrincipal = Principal | PortalPrincipal;
+export interface SystemPrincipal {
+  kind: "system";
+  organisationId: string;
+  capabilities: Capability[];
+}
+
+export function sourceSystemPrincipal(organisationId: string): SystemPrincipal {
+  return {
+    kind: "system",
+    organisationId,
+    capabilities: ["supplier:request", "case:read", "case:resolve", "supplier:manage_contact"],
+  };
+}
+
+export type AnyPrincipal = Principal | PortalPrincipal | SystemPrincipal;
 
 export interface CommandEnvelope<T extends Command = Command> {
   commandId: string;

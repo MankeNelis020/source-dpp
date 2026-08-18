@@ -1,4 +1,4 @@
-import { generateBearerToken, tokenFingerprint } from "@/infrastructure/crypto/tokens";
+import { generateBearerToken, hashToken, tokenFingerprint } from "@/infrastructure/crypto/tokens";
 import type { PersistencePort } from "@/infrastructure/database/ports";
 import type { OutboxRecord } from "@/infrastructure/outbox/types";
 import type { EngineState } from "@/domain/source/types";
@@ -76,6 +76,19 @@ export async function queueSupplierOutreach(args: {
     .map((id) => state.requests.find((r) => r.caseId === id)?.id)
     .find(Boolean);
 
+  const inbound = inboundReplyAddress();
+  if (inbound) {
+    await store.saveInboundCorrelation({
+      id: store.nextId("inbcorr"),
+      organisationId,
+      caseId: uniqueCaseIds[0],
+      requestId,
+      tokenHash: hashToken(inbound.token),
+      createdAt: now.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    });
+  }
+
   const outbox: OutboxRecord = {
     id: store.nextId("obx"),
     organisationId,
@@ -89,6 +102,7 @@ export async function queueSupplierOutreach(args: {
       templateVersion: rendered.templateVersion,
       to,
       from: fromAddress,
+      replyTo: inbound?.address,
       subject: rendered.subject,
       text: rendered.text,
       html: rendered.html,
@@ -191,4 +205,15 @@ function fromAddressFor(organisationName: string) {
     /* local tests */
   }
   return `${organisationName} via SOURCE <requests@localhost>`;
+}
+
+function inboundReplyAddress(): { token: string; address: string } | undefined {
+  try {
+    const domain = loadSourceEnvironment().inboundReplyDomain;
+    if (!domain) return undefined;
+    const token = generateBearerToken();
+    return { token, address: `reply+${token}@${domain}` };
+  } catch {
+    return undefined;
+  }
 }

@@ -7,7 +7,8 @@ This repository is a strangler migration of the Missing Information Engine: doma
 See `docs/architecture/p0-production.md` for the P0 audit, schema, threat model, and test plan.
 See `docs/architecture/auth-and-organisations.md` for Supabase Auth and organisation membership.
 See `docs/architecture/storage.md` for private import and evidence files.
-See `docs/operations/environments.md` for local, preview, and production configuration.
+See `docs/architecture/supplier-loop.md` for the manufacturer → supplier path.
+See `docs/operations/hosted-smoke-test.md` for `npm run smoke:preview`.
 
 ```bash
 npm install
@@ -24,7 +25,8 @@ Open [http://localhost:3000](http://localhost:3000).
 | `/product` `/how-it-works` `/suppliers` `/pricing` `/developers` | Marketing pages |
 | `/signup` `/login` `/verify-email` `/forgot-password` `/onboarding/organisation` | Auth and first organisation |
 | `/app` | Manufacturer workspace (empty until you import) |
-| `/app/missing` | Resolution cases — missing information |
-| `/s/demo` | Supplier request (no account wall; first-class unhappy actions) |
+| `/app/import` | Upload catalogue |
+| `/app/missing` | Missing information |
+| `/s/{token}` | Supplier portal from the email (no SOURCE account) |
 
 We never say a claim is true. We show you how it's known.

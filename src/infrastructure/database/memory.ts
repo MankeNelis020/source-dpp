@@ -5,7 +5,7 @@ import { hashToken, hashesEqual } from "@/infrastructure/crypto/tokens";
 import type { OutboxRecord, OutboxStatus } from "@/infrastructure/outbox/types";
 import { PORTAL_ALLOWED_DEFAULT, type ImportJob, type ImportJobEvent, type ImportMappingProfile, type ImmutableAuditEvent, type IdentityCommandRecord, type Membership, type Organisation, type OrganisationInvitation, type ProcessedCommand, type SupplierPortalGrant, type UserRecord } from "@/server/source/types";
 import type { EvidenceObject, PersistencePort, SessionRecord, ShareableTrustCandidate, StorageObjectRecord } from "./ports";
-import type { EmailProviderEventRecord, OutboundMessageRecord } from "@/infrastructure/email/transport";
+import type { EmailProviderEventRecord, InboundCorrelationRecord, InboundEmailEventRecord, OutboundMessageRecord } from "@/infrastructure/email/transport";
 
 const DEMO_EXPIRY = "2027-08-17T00:00:00.000Z";
 
@@ -121,6 +121,8 @@ export class MemoryPersistence implements PersistencePort {
   outbox: OutboxRecord[] = [];
   outboundMessages: OutboundMessageRecord[] = [];
   emailProviderEvents: EmailProviderEventRecord[] = [];
+  inboundCorrelations: InboundCorrelationRecord[] = [];
+  inboundEmailEvents: InboundEmailEventRecord[] = [];
   sessions = new Map<string, SessionRecord>();
   invitations = new Map<string, OrganisationInvitation>();
   identityCommands = new Map<string, IdentityCommandRecord>();
@@ -229,6 +231,8 @@ export class MemoryPersistence implements PersistencePort {
     this.outbox = [];
     this.outboundMessages = [];
     this.emailProviderEvents = [];
+    this.inboundCorrelations = [];
+    this.inboundEmailEvents = [];
     this.sessions.clear();
     this.invitations.clear();
     this.identityCommands.clear();
@@ -315,6 +319,9 @@ export class MemoryPersistence implements PersistencePort {
   }
   saveEngine(organisationId: string, state: EngineState) {
     this.engines.set(organisationId, structuredClone(state));
+  }
+  listOrganisationIds() {
+    return [...new Set([...this.organisations.keys(), ...this.engines.keys()])];
   }
   saveMappingProfile(profile: ImportMappingProfile) {
     this.mappingProfiles.set(`${profile.organisationId}:${profile.sourceFormat}`, { ...profile });
@@ -519,6 +526,25 @@ export class MemoryPersistence implements PersistencePort {
       (item) => item.provider === provider && item.providerEventId === providerEventId
     );
     return row ? { ...row } : undefined;
+  }
+
+  saveInboundCorrelation(record: InboundCorrelationRecord) {
+    const idx = this.inboundCorrelations.findIndex((row) => row.id === record.id);
+    if (idx >= 0) this.inboundCorrelations[idx] = { ...record };
+    else this.inboundCorrelations.push({ ...record });
+  }
+
+  findInboundCorrelationByTokenHash(hash: string) {
+    return this.inboundCorrelations.find((row) => hashesEqual(row.tokenHash, hash));
+  }
+
+  insertInboundEmailEvent(record: InboundEmailEventRecord) {
+    const exists = this.inboundEmailEvents.some(
+      (row) => row.provider === record.provider && row.providerEventId === record.providerEventId
+    );
+    if (exists) return false;
+    this.inboundEmailEvents.push({ ...record });
+    return true;
   }
 
   saveSession(session: SessionRecord) {

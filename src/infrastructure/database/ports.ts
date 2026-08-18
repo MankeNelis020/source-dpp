@@ -14,7 +14,7 @@ import type {
 } from "@/server/source/types";
 import type { OutboxRecord, OutboxStatus } from "@/infrastructure/outbox/types";
 import type { StorageObjectRecord } from "@/infrastructure/storage/port";
-import type { EmailProviderEventRecord, OutboundMessageRecord } from "@/infrastructure/email/transport";
+import type { EmailProviderEventRecord, InboundCorrelationRecord, InboundEmailEventRecord, OutboundMessageRecord } from "@/infrastructure/email/transport";
 
 export type { StorageObjectRecord } from "@/infrastructure/storage/port";
 
@@ -84,6 +84,7 @@ export interface PersistencePort {
 
   loadEngine(organisationId: string): MaybePromise<EngineState>;
   saveEngine(organisationId: string, state: EngineState): MaybePromise<void>;
+  listOrganisationIds(): MaybePromise<string[]>;
 
   saveMappingProfile?(profile: ImportMappingProfile): MaybePromise<void>;
   getMappingProfile?(organisationId: string, sourceFormat: string): MaybePromise<ImportMappingProfile | undefined>;
@@ -133,6 +134,10 @@ export interface PersistencePort {
   listOutboundMessages(organisationId: string, caseId?: string): MaybePromise<OutboundMessageRecord[]>;
   insertEmailProviderEvent(record: EmailProviderEventRecord): MaybePromise<boolean>;
   getEmailProviderEvent(provider: string, providerEventId: string): MaybePromise<EmailProviderEventRecord | undefined>;
+
+  saveInboundCorrelation(record: InboundCorrelationRecord): MaybePromise<void>;
+  findInboundCorrelationByTokenHash(hash: string): MaybePromise<InboundCorrelationRecord | undefined>;
+  insertInboundEmailEvent(record: InboundEmailEventRecord): MaybePromise<boolean>;
 
   saveSession(session: SessionRecord): MaybePromise<void>;
   getSession(id: string): MaybePromise<SessionRecord | undefined>;

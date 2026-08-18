@@ -336,6 +336,7 @@ export interface ResolutionCase {
   identityStatus: IdentityStatus;
   identityConfidence?: number;
   identityModelVersion?: IdentityEngineVersion;
+  identityCandidateIds?: string[];
   requestId?: string;
   productId?: string;
   supplierId?: string;
