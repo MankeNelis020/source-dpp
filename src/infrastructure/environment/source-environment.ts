@@ -16,6 +16,7 @@ export const PRODUCTION_PROJECT_REF = "vezhdbzizniurehclxpg";
 
 export type RuntimeEnvironment = "local" | "preview" | "production";
 export type PersistenceAdapterKind = "memory" | "postgres";
+export type IdentityProviderKind = "supabase" | "test";
 
 export class SourceEnvironmentError extends Error {
   readonly code = "SOURCE_ENVIRONMENT_MISMATCH";
@@ -29,12 +30,15 @@ export class SourceEnvironmentError extends Error {
 export interface SourceEnvironment {
   runtime: RuntimeEnvironment;
   persistence: PersistenceAdapterKind;
+  identityProvider: IdentityProviderKind;
   supabaseUrl?: string;
   appDatabaseUrl?: string;
   migratorDatabaseUrl?: string;
   supabaseAnonKey?: string;
-  /** Server-only. Never expose to client bundles. */
+  /** Server-only. Never expose to client bundles. Never used for domain I/O. */
   supabaseServiceRoleKey?: string;
+  appPublicUrl?: string;
+  invitationTtlDays: number;
 }
 
 export type EnvMap = Record<string, string | undefined>;
@@ -56,6 +60,9 @@ export function loadSourceEnvironment(
   const migratorDatabaseUrl = trim(env.SOURCE_MIGRATOR_DATABASE_URL) ?? (mode === "migrator" ? trim(env.DATABASE_URL) : undefined);
   const supabaseAnonKey = trim(env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
   const supabaseServiceRoleKey = trim(env.SUPABASE_SERVICE_ROLE_KEY);
+  const appPublicUrl = trim(env.NEXT_PUBLIC_SOURCE_APP_URL);
+  const invitationTtlDays = Number(env.SOURCE_INVITATION_TTL_DAYS ?? 7);
+  const identityProvider = resolveIdentityProvider(runtime, env, supabaseUrl, supabaseAnonKey);
   const persistence = mode === "migrator" ? "postgres" : resolvePersistenceAdapter(runtime, env);
 
   assertProjectIsolation({
@@ -89,11 +96,14 @@ export function loadSourceEnvironment(
     return {
       runtime,
       persistence: "postgres",
+      identityProvider,
       supabaseUrl,
       appDatabaseUrl,
       migratorDatabaseUrl,
       supabaseAnonKey,
       supabaseServiceRoleKey,
+      appPublicUrl,
+      invitationTtlDays: Number.isFinite(invitationTtlDays) && invitationTtlDays > 0 ? invitationTtlDays : 7,
     };
   }
 
@@ -101,6 +111,11 @@ export function loadSourceEnvironment(
     if (!supabaseUrl) {
       throw new SourceEnvironmentError(
         "SOURCE environment configuration mismatch: NEXT_PUBLIC_SUPABASE_URL is required."
+      );
+    }
+    if (!supabaseAnonKey) {
+      throw new SourceEnvironmentError(
+        "SOURCE environment configuration mismatch: NEXT_PUBLIC_SUPABASE_ANON_KEY is required."
       );
     }
     if (!appDatabaseUrl) {
@@ -116,6 +131,11 @@ export function loadSourceEnvironment(
     if (!trim(env.SOURCE_OPAQUE_REF_SECRET)) {
       throw new SourceEnvironmentError(
         "SOURCE environment configuration mismatch: SOURCE_OPAQUE_REF_SECRET is required."
+      );
+    }
+    if (identityProvider !== "supabase") {
+      throw new SourceEnvironmentError(
+        "SOURCE environment configuration mismatch: preview and production cannot use the test identity provider."
       );
     }
     assertAppRole(appDatabaseUrl);
@@ -137,11 +157,14 @@ export function loadSourceEnvironment(
   return {
     runtime,
     persistence,
+    identityProvider,
     supabaseUrl,
     appDatabaseUrl,
     migratorDatabaseUrl,
     supabaseAnonKey,
     supabaseServiceRoleKey,
+    appPublicUrl,
+    invitationTtlDays: Number.isFinite(invitationTtlDays) && invitationTtlDays > 0 ? invitationTtlDays : 7,
   };
 }
 
@@ -190,6 +213,32 @@ export function postgresUrlUser(url: string): string | undefined {
 export function roleName(user: string | undefined): string | undefined {
   if (!user) return undefined;
   return user.split(".")[0]?.toLowerCase();
+}
+
+function resolveIdentityProvider(
+  runtime: RuntimeEnvironment,
+  env: EnvMap,
+  supabaseUrl: string | undefined,
+  supabaseAnonKey: string | undefined
+): IdentityProviderKind {
+  const requested = trim(env.SOURCE_IDENTITY_PROVIDER)?.toLowerCase();
+  if (requested && requested !== "supabase" && requested !== "test") {
+    throw new SourceEnvironmentError(
+      "SOURCE environment configuration mismatch: SOURCE_IDENTITY_PROVIDER must be supabase or test."
+    );
+  }
+  if (runtime === "preview" || runtime === "production") {
+    if (requested === "test") {
+      throw new SourceEnvironmentError(
+        "SOURCE environment configuration mismatch: preview and production cannot use the test identity provider."
+      );
+    }
+    return "supabase";
+  }
+  if (requested === "test") return "test";
+  if (requested === "supabase") return "supabase";
+  if (supabaseUrl && supabaseAnonKey) return "supabase";
+  return "test";
 }
 
 function resolvePersistenceAdapter(runtime: RuntimeEnvironment, env: EnvMap): PersistenceAdapterKind {
@@ -247,13 +296,11 @@ function assertProjectIsolation(input: {
 
   if (input.supabaseUrl) {
     if (input.runtime === "production" && input.supabaseUrl !== PRODUCTION_SUPABASE_URL) {
-      if (containsProjectRef(input.supabaseUrl, DEV_PREVIEW_PROJECT_REF)) {
-        throw new SourceEnvironmentError(
-          "SOURCE environment configuration mismatch: production cannot use the development Supabase project."
-        );
-      }
+      throw new SourceEnvironmentError(
+        "SOURCE environment configuration mismatch: production cannot use the development Supabase project."
+      );
     }
-    if (input.runtime === "preview" && input.supabaseUrl === PRODUCTION_SUPABASE_URL) {
+    if (input.runtime === "preview" && input.supabaseUrl !== DEV_PREVIEW_SUPABASE_URL) {
       throw new SourceEnvironmentError(
         "SOURCE environment configuration mismatch: preview cannot use the production Supabase project."
       );

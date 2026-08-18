@@ -10,6 +10,7 @@ import { emptyState } from "@/domain/source/engine";
 import { createImportJob } from "@/server/source/import/service";
 import { executeResolutionRun } from "@/server/source/resolution-run";
 import { resolveUserPrincipal, dispatchCommand } from "@/server/source/commands/dispatch";
+import { createOrganisationForIdentity } from "@/server/source/organisations";
 import { ROLE_CAPABILITIES } from "@/server/source/authorization";
 import type { PersistencePort } from "@/infrastructure/database/ports";
 
@@ -244,5 +245,44 @@ describe("B1 runtime persistence survival", () => {
       client.release();
     }
     await restarted.end();
+  });
+
+  it("keeps Alice's organisation and empty engine after a new PostgresPersistence instance", async () => {
+    const firstPool = createPostgresPool(appUrl, "app");
+    const first = new PostgresPersistence(firstPool);
+    const suffix = `${Date.now()}`;
+    const alice = {
+      userId: `auth-alice-${suffix}`,
+      email: `alice-${suffix}@a.example`,
+      emailVerified: true as const,
+      authenticationMethod: "TEST" as const,
+    };
+    const created = await createOrganisationForIdentity({
+      store: first,
+      identity: alice,
+      name: "Manufacturer A",
+      country: "Netherlands",
+      idempotencyKey: `create-${alice.userId}`,
+      now: NOW,
+    });
+    expect(created.principal.roles).toEqual(["OWNER"]);
+    const before = await first.loadEngine(created.organisation.id);
+    expect(before.requirements).toHaveLength(0);
+    expect(before.tenant.name).toBe("Manufacturer A");
+    before.seq = 4;
+    await first.saveEngine(created.organisation.id, before);
+    await firstPool.end();
+
+    const secondPool = createPostgresPool(appUrl, "app");
+    const second = new PostgresPersistence(secondPool);
+    const org = await second.getOrganisation(created.organisation.id);
+    expect(org?.name).toBe("Manufacturer A");
+    const memberships = await second.listMemberships(alice.userId);
+    expect(memberships).toHaveLength(1);
+    expect(memberships[0]?.role).toBe("OWNER");
+    const after = await second.loadEngine(created.organisation.id);
+    expect(after.seq).toBe(4);
+    expect(after.requirements).toHaveLength(0);
+    await secondPool.end();
   });
 });

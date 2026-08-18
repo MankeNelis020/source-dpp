@@ -11,6 +11,7 @@ import { MemoryPersistence } from "@/infrastructure/database/memory";
 const SECRETS = {
   SOURCE_SESSION_SECRET: "test-session-secret",
   SOURCE_OPAQUE_REF_SECRET: "test-opaque-secret",
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: "test-anon-key-not-a-secret",
 };
 
 const DEV_APP_URL = "postgres://source_app:not-a-real-secret@localhost:5432/postgres";
@@ -98,12 +99,16 @@ describe("SOURCE environment isolation", () => {
       createPersistence({
         runtime: "production",
         persistence: "postgres",
+        identityProvider: "supabase",
+        invitationTtlDays: 7,
       })
     ).toThrow(SourceEnvironmentError);
     expect(() =>
       createPersistence({
         runtime: "production",
         persistence: "memory",
+        identityProvider: "supabase",
+        invitationTtlDays: 7,
       })
     ).toThrow(/memory persistence is not allowed/);
   });

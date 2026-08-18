@@ -11,6 +11,8 @@ import type {
   ImportMappingProfile,
   Membership,
   Organisation,
+  OrganisationInvitation,
+  IdentityCommandRecord,
   ProcessedCommand,
   SupplierPortalGrant,
   UserRecord,
@@ -82,12 +84,20 @@ export class PostgresPersistence implements PersistencePort {
   }
 
   async getOrganisation(id: string) {
-    const { rows } = await this.q("SELECT id, name, slug FROM organisations WHERE id = $1", [id]);
+    const { rows } = await this.q(
+      `SELECT id, name, slug, country, website, created_by AS "createdBy", created_at AS "createdAt"
+       FROM organisations WHERE id = $1`,
+      [id]
+    );
     return rows[0] as Organisation | undefined;
   }
 
   async getOrganisationBySlug(slug: string) {
-    const { rows } = await this.q("SELECT id, name, slug FROM organisations WHERE slug = $1", [slug]);
+    const { rows } = await this.q(
+      `SELECT id, name, slug, country, website, created_by AS "createdBy", created_at AS "createdAt"
+       FROM organisations WHERE slug = $1`,
+      [slug]
+    );
     return rows[0] as Organisation | undefined;
   }
 
@@ -106,7 +116,9 @@ export class PostgresPersistence implements PersistencePort {
 
   async getMembership(userId: string, organisationId: string) {
     const { rows } = await this.q(
-      "SELECT id, user_id AS \"userId\", organisation_id AS \"organisationId\", role, capabilities FROM memberships WHERE user_id = $1 AND organisation_id = $2",
+      `SELECT id, user_id AS "userId", organisation_id AS "organisationId", role, capabilities,
+              status, created_by AS "createdBy", created_at AS "createdAt"
+       FROM memberships WHERE user_id = $1 AND organisation_id = $2`,
       [userId, organisationId]
     );
     return rows[0] as Membership | undefined;
@@ -114,7 +126,9 @@ export class PostgresPersistence implements PersistencePort {
 
   async listMemberships(userId: string) {
     const { rows } = await this.q(
-      "SELECT id, user_id AS \"userId\", organisation_id AS \"organisationId\", role, capabilities FROM memberships WHERE user_id = $1",
+      `SELECT id, user_id AS "userId", organisation_id AS "organisationId", role, capabilities,
+              status, created_by AS "createdBy", created_at AS "createdAt"
+       FROM memberships WHERE user_id = $1`,
       [userId]
     );
     return rows as Membership[];
@@ -122,10 +136,10 @@ export class PostgresPersistence implements PersistencePort {
 
   async saveOrganisation(org: Organisation) {
     await this.q(
-      `INSERT INTO organisations (id, name, slug)
-       VALUES ($1,$2,$3)
-       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug`,
-      [org.id, org.name, org.slug]
+      `INSERT INTO organisations (id, name, slug, country, website, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug, country = EXCLUDED.country, website = EXCLUDED.website, created_by = COALESCE(EXCLUDED.created_by, organisations.created_by)`,
+      [org.id, org.name, org.slug, org.country ?? null, org.website ?? null, org.createdBy ?? null]
     );
   }
 
@@ -140,10 +154,122 @@ export class PostgresPersistence implements PersistencePort {
 
   async saveMembership(membership: Membership) {
     await this.q(
-      `INSERT INTO memberships (id, user_id, organisation_id, role, capabilities)
-       VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT (user_id, organisation_id) DO UPDATE SET role = EXCLUDED.role, capabilities = EXCLUDED.capabilities`,
-      [membership.id, membership.userId, membership.organisationId, membership.role, membership.capabilities]
+      `INSERT INTO memberships (id, user_id, organisation_id, role, capabilities, status, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (user_id, organisation_id) DO UPDATE SET
+         role = EXCLUDED.role, capabilities = EXCLUDED.capabilities, status = EXCLUDED.status`,
+      [
+        membership.id,
+        membership.userId,
+        membership.organisationId,
+        membership.role,
+        membership.capabilities,
+        membership.status ?? "ACTIVE",
+        membership.createdBy ?? null,
+      ]
+    );
+  }
+
+  async listOrganisationMemberships(organisationId: string) {
+    const { rows } = await this.q(
+      `SELECT id, user_id AS "userId", organisation_id AS "organisationId", role, capabilities,
+              status, created_by AS "createdBy", created_at AS "createdAt"
+       FROM memberships WHERE organisation_id = $1`,
+      [organisationId]
+    );
+    return rows as Membership[];
+  }
+
+  async countActiveOwners(organisationId: string) {
+    const { rows } = await this.q(
+      `SELECT count(*)::int AS n FROM memberships
+       WHERE organisation_id = $1 AND role = 'OWNER' AND COALESCE(status, 'ACTIVE') <> 'SUSPENDED'`,
+      [organisationId]
+    );
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  async saveInvitation(invitation: OrganisationInvitation) {
+    await this.withTenant(invitation.organisationId, async (client) => {
+      await client.query(
+        `INSERT INTO organisation_invitations
+          (id, organisation_id, email_normalized, role, token_hash, expires_at, accepted_at, revoked_at, created_by, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         ON CONFLICT (id) DO UPDATE SET
+           accepted_at = EXCLUDED.accepted_at, revoked_at = EXCLUDED.revoked_at`,
+        [
+          invitation.id,
+          invitation.organisationId,
+          invitation.emailNormalized,
+          invitation.role,
+          invitation.tokenHash,
+          invitation.expiresAt,
+          invitation.acceptedAt ?? null,
+          invitation.revokedAt ?? null,
+          invitation.createdBy,
+          invitation.createdAt,
+        ]
+      );
+    });
+  }
+
+  async findInvitationByTokenHash(hash: string) {
+    const { rows } = await this.q("SELECT * FROM find_invitation_by_hash($1)", [hash]);
+    const mapped = rows.map(mapInvitation);
+    return mapped.find((row) => hashesEqual(row.tokenHash, hash));
+  }
+
+  async listInvitations(organisationId: string) {
+    return this.withTenant(organisationId, async (client) => {
+      const { rows } = await client.query(
+        "SELECT * FROM organisation_invitations WHERE organisation_id = $1 ORDER BY created_at",
+        [organisationId]
+      );
+      return rows.map(mapInvitation);
+    });
+  }
+
+  async findPendingInvitation(organisationId: string, emailNormalized: string) {
+    return this.withTenant(organisationId, async (client) => {
+      const { rows } = await client.query(
+        `SELECT * FROM organisation_invitations
+         WHERE organisation_id = $1 AND email_normalized = $2 AND accepted_at IS NULL AND revoked_at IS NULL
+         ORDER BY created_at DESC LIMIT 1`,
+        [organisationId, emailNormalized]
+      );
+      return rows[0] ? mapInvitation(rows[0]) : undefined;
+    });
+  }
+
+  async findIdentityCommand(userId: string, idempotencyKey: string) {
+    const { rows } = await this.q(
+      `SELECT user_id AS "userId", idempotency_key AS "idempotencyKey", command_type AS "commandType",
+              organisation_id AS "organisationId", result_json AS result, processed_at AS "processedAt"
+       FROM identity_commands WHERE user_id = $1 AND idempotency_key = $2`,
+      [userId, idempotencyKey]
+    );
+    return rows[0] as IdentityCommandRecord | undefined;
+  }
+
+  async saveIdentityCommand(record: IdentityCommandRecord) {
+    await this.q(
+      `INSERT INTO identity_commands (user_id, idempotency_key, command_type, organisation_id, result_json, processed_at)
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6)
+       ON CONFLICT (user_id, idempotency_key) DO UPDATE SET
+         organisation_id = COALESCE(EXCLUDED.organisation_id, identity_commands.organisation_id),
+         result_json = CASE
+           WHEN EXCLUDED.organisation_id IS NOT NULL THEN EXCLUDED.result_json
+           ELSE identity_commands.result_json
+         END,
+         processed_at = EXCLUDED.processed_at`,
+      [
+        record.userId,
+        record.idempotencyKey,
+        record.commandType,
+        record.organisationId ?? null,
+        JSON.stringify(record.result),
+        record.processedAt,
+      ]
     );
   }
 
@@ -613,6 +739,21 @@ export class PostgresPersistence implements PersistencePort {
       identityMatched: true,
     }));
   }
+}
+
+function mapInvitation(row: Record<string, unknown>): OrganisationInvitation {
+  return {
+    id: String(row.id),
+    organisationId: String(row.organisation_id ?? row.organisationId),
+    emailNormalized: String(row.email_normalized ?? row.emailNormalized),
+    role: (row.role as OrganisationInvitation["role"]) ?? "MEMBER",
+    tokenHash: String(row.token_hash ?? row.tokenHash),
+    expiresAt: String(row.expires_at ?? row.expiresAt),
+    acceptedAt: (row.accepted_at ?? row.acceptedAt) as string | undefined,
+    revokedAt: (row.revoked_at ?? row.revokedAt) as string | undefined,
+    createdBy: String(row.created_by ?? row.createdBy),
+    createdAt: String(row.created_at ?? row.createdAt),
+  };
 }
 
 function mapImportJob(row: Record<string, unknown>): ImportJob {

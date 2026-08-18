@@ -1,5 +1,7 @@
 "use client";
 
+/** Retired client localStorage session. Classification: REMOVE. Workspace uses /api/session. */
+
 const KEY = "source.session";
 
 export interface SourceSession {

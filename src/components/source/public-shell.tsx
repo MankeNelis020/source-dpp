@@ -79,8 +79,10 @@ export function PublicShell({ children }: { children: React.ReactNode }) {
             <div className="space-y-2">
               <SourceLabel>Network</SourceLabel>
               <FooterLink href="/suppliers">For suppliers</FooterLink>
+              <FooterLink href="/privacy">Privacy</FooterLink>
+              <FooterLink href="/terms">Terms</FooterLink>
+              <FooterLink href="/security">Security</FooterLink>
               <FooterLink href="/login">Sign in</FooterLink>
-              <FooterLink href="/app">Demo workspace</FooterLink>
             </div>
           </div>
         </div>

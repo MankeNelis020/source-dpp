@@ -2,21 +2,32 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useSyncExternalStore, useState } from "react";
+import { useState } from "react";
 import { WORKSPACE_NAV } from "@/lib/source/brand";
-import { DEMO_ORG } from "@/lib/source/demo-data";
-import { clearSession, readSession, subscribeSession } from "@/lib/session";
 import { SourceWordmark } from "./wordmark";
 import { Mono, SourceLabel, StatusPill } from "./ui";
 import { cn } from "@/lib/utils";
 import { CommandSearch } from "./command-search";
 import { useSourceQuery } from "@/client/source/api";
+import { api } from "@/client/source/api";
+
+type SessionPayload = {
+  authenticated: boolean;
+  email?: string;
+  organisationId?: string;
+  memberships?: { organisationId: string; name: string; role: string }[];
+  nextPath?: string;
+};
 
 export function WorkspaceShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const session = useSyncExternalStore(subscribeSession, readSession, () => null);
+  const { data: session } = useSourceQuery<SessionPayload>("/api/session");
+  const organisation =
+    session?.memberships?.find((row) => row.organisationId === session.organisationId)?.name ??
+    session?.memberships?.[0]?.name ??
+    "Workspace";
 
   return (
     <div className="source-theme flex min-h-full bg-[#EFF2ED] text-[#101A15]">
@@ -46,28 +57,26 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
         </nav>
         <div className="mt-auto space-y-2 border-t border-[#101A15]/8 px-4 py-4">
           <SourceLabel>Organisation</SourceLabel>
-          <div className="text-[13px]">{session?.organisation ?? DEMO_ORG.name}</div>
+          <div className="text-[13px]">{organisation}</div>
+          {session?.memberships && session.memberships.length > 1 ? (
+            <Link href="/select-organisation" className="block text-[11px] text-[#101A15]/50 hover:text-[#101A15]">
+              Switch workspace
+            </Link>
+          ) : null}
           <div className="flex items-center justify-between gap-2 pt-1">
-            <Mono className="truncate text-[11px] text-[#101A15]/55">
-              {session?.email ?? "demo@source.eu"}
-            </Mono>
-            {session ? (
-              <button
-                type="button"
-                className="text-[11px] text-[#101A15]/50 hover:text-[#101A15]"
-                onClick={() => {
-                  clearSession();
-                  void fetch("/api/auth/logout", { method: "POST", credentials: "include" });
-                  router.push("/");
-                }}
-              >
-                Sign out
-              </button>
-            ) : (
-              <Link href="/login?next=/app" className="text-[11px] text-[#101A15]/50 hover:text-[#101A15]">
-                Sign in
-              </Link>
-            )}
+            <Mono className="truncate text-[11px] text-[#101A15]/55">{session?.email ?? ""}</Mono>
+            <button
+              type="button"
+              className="text-[11px] text-[#101A15]/50 hover:text-[#101A15]"
+              onClick={() => {
+                void api("/api/auth/logout", { method: "POST", body: "{}" }).finally(() => {
+                  router.push("/login");
+                  router.refresh();
+                });
+              }}
+            >
+              Sign out
+            </button>
           </div>
         </div>
       </aside>
@@ -108,7 +117,9 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
 }
 
 function ImportBanner() {
-  const { data } = useSourceQuery<{ jobs: { id: string; state: string; processedCount: number; totalCount: number }[] }>("/api/imports");
+  const { data } = useSourceQuery<{ jobs: { id: string; state: string; processedCount: number; totalCount: number }[] }>(
+    "/api/imports"
+  );
   const running = data?.jobs.find((j) => j.state !== "COMPLETE" && j.state !== "FAILED" && j.state !== "PARTIAL");
   if (!running) {
     return <StatusPill tone="muted">Server-backed workspace</StatusPill>;

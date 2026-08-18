@@ -3,7 +3,7 @@ import type { EngineState } from "@/domain/source/types";
 import { createSeedState, emptyState, hydrateEngineState } from "@/domain/source";
 import { hashToken, hashesEqual } from "@/infrastructure/crypto/tokens";
 import type { OutboxRecord, OutboxStatus } from "@/infrastructure/outbox/types";
-import { PORTAL_ALLOWED_DEFAULT, type ImportJob, type ImportJobEvent, type ImportMappingProfile, type ImmutableAuditEvent, type Membership, type Organisation, type ProcessedCommand, type SupplierPortalGrant, type UserRecord } from "@/server/source/types";
+import { PORTAL_ALLOWED_DEFAULT, type ImportJob, type ImportJobEvent, type ImportMappingProfile, type ImmutableAuditEvent, type IdentityCommandRecord, type Membership, type Organisation, type OrganisationInvitation, type ProcessedCommand, type SupplierPortalGrant, type UserRecord } from "@/server/source/types";
 import type { EvidenceObject, PersistencePort, SessionRecord, ShareableTrustCandidate } from "./ports";
 
 const DEMO_EXPIRY = "2027-08-17T00:00:00.000Z";
@@ -118,6 +118,8 @@ export class MemoryPersistence implements PersistencePort {
   evidence = new Map<string, EvidenceObject>();
   outbox: OutboxRecord[] = [];
   sessions = new Map<string, SessionRecord>();
+  invitations = new Map<string, OrganisationInvitation>();
+  identityCommands = new Map<string, IdentityCommandRecord>();
   seq = 1;
   private chain: Promise<unknown> = Promise.resolve();
 
@@ -136,9 +138,9 @@ export class MemoryPersistence implements PersistencePort {
       ["user-nordic-owner", { id: "user-nordic-owner", email: "owner@nordic.example", displayName: "Nordic Owner" }],
     ]);
     this.memberships = [
-      { id: "mem-acme-owner", userId: "user-acme-owner", organisationId: "acme", role: "OWNER", capabilities: [...ROLE_CAPABILITIES.OWNER] },
-      { id: "mem-acme-reviewer", userId: "user-acme-reviewer", organisationId: "acme", role: "REVIEWER", capabilities: [...ROLE_CAPABILITIES.REVIEWER] },
-      { id: "mem-nordic-owner", userId: "user-nordic-owner", organisationId: "nordic", role: "OWNER", capabilities: [...ROLE_CAPABILITIES.OWNER] },
+      { id: "mem-acme-owner", userId: "user-acme-owner", organisationId: "acme", role: "OWNER", capabilities: [...ROLE_CAPABILITIES.OWNER], status: "ACTIVE" },
+      { id: "mem-acme-reviewer", userId: "user-acme-reviewer", organisationId: "acme", role: "REVIEWER", capabilities: [...ROLE_CAPABILITIES.REVIEWER], status: "ACTIVE" },
+      { id: "mem-nordic-owner", userId: "user-nordic-owner", organisationId: "nordic", role: "OWNER", capabilities: [...ROLE_CAPABILITIES.OWNER], status: "ACTIVE" },
     ];
     this.engines = new Map([
       ["acme", createSeedState()],
@@ -221,6 +223,8 @@ export class MemoryPersistence implements PersistencePort {
     this.evidence.clear();
     this.outbox = [];
     this.sessions.clear();
+    this.invitations.clear();
+    this.identityCommands.clear();
     this.seq = 1000;
   }
 
@@ -254,6 +258,45 @@ export class MemoryPersistence implements PersistencePort {
     );
     if (idx >= 0) this.memberships[idx] = { ...membership };
     else this.memberships.push({ ...membership });
+  }
+  listOrganisationMemberships(organisationId: string) {
+    return this.memberships.filter((m) => m.organisationId === organisationId);
+  }
+  countActiveOwners(organisationId: string) {
+    return this.memberships.filter(
+      (m) => m.organisationId === organisationId && m.role === "OWNER" && m.status !== "SUSPENDED"
+    ).length;
+  }
+  saveInvitation(invitation: OrganisationInvitation) {
+    this.invitations.set(invitation.id, { ...invitation });
+  }
+  findInvitationByTokenHash(hash: string) {
+    return [...this.invitations.values()].find((row) => hashesEqual(row.tokenHash, hash));
+  }
+  listInvitations(organisationId: string) {
+    return [...this.invitations.values()].filter((row) => row.organisationId === organisationId);
+  }
+  findPendingInvitation(organisationId: string, emailNormalized: string) {
+    return [...this.invitations.values()].find(
+      (row) =>
+        row.organisationId === organisationId &&
+        row.emailNormalized === emailNormalized &&
+        !row.acceptedAt &&
+        !row.revokedAt
+    );
+  }
+  findIdentityCommand(userId: string, idempotencyKey: string) {
+    return this.identityCommands.get(`${userId}:${idempotencyKey}`);
+  }
+  saveIdentityCommand(record: IdentityCommandRecord) {
+    const key = `${record.userId}:${record.idempotencyKey}`;
+    const existing = this.identityCommands.get(key);
+    if (existing?.organisationId && !record.organisationId) return;
+    this.identityCommands.set(key, {
+      ...record,
+      organisationId: record.organisationId ?? existing?.organisationId,
+      result: record.organisationId ? record.result : existing?.result ?? record.result,
+    });
   }
   loadEngine(organisationId: string) {
     const state = this.engines.get(organisationId);

@@ -1,18 +1,19 @@
+/**
+ * Legacy HMAC demo session. Retired from principal resolution.
+ * Classification: REMOVE from preview/production. Not used by SOURCE APIs.
+ * Active organisation selection uses `source_organisation`, signed and bound to userId.
+ */
 import { cookies } from "next/headers";
 import { randomBytes } from "node:crypto";
 import { signValue, verifySignedValue } from "@/infrastructure/crypto/tokens";
-import { demoAuthEnabled } from "@/infrastructure/runtime";
 
 const COOKIE = "source_session";
 
-export const DEMO_AUTH_NON_PRODUCTION = true;
+export const DEMO_AUTH_NON_PRODUCTION = false;
 
 function sessionSecret(): string {
   const secret = process.env.SOURCE_SESSION_SECRET;
   if (secret) return secret;
-  if (process.env.NODE_ENV === "production" && process.env.SOURCE_DEMO_AUTH !== "1") {
-    throw new Error("SOURCE_SESSION_SECRET is required in production. Demo session secrets are not permitted.");
-  }
   return "source-demo-session-secret-not-for-production";
 }
 
@@ -61,9 +62,7 @@ export function sessionCookieOptions() {
 }
 
 export function assertDemoAuthAllowed() {
-  if (!demoAuthEnabled()) {
-    throw new Error("Demo authentication is disabled.");
-  }
+  throw new Error("Demo authentication is disabled.");
 }
 
 export { COOKIE as SESSION_COOKIE };
