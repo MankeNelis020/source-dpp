@@ -3,11 +3,16 @@ import type { Command } from "@/domain/source/types";
 export type Role =
   | "OWNER"
   | "ADMIN"
+  | "MEMBER"
   | "COMPLIANCE_MANAGER"
   | "PROCUREMENT_MANAGER"
   | "DATA_STEWARD"
   | "REVIEWER"
   | "AUDITOR";
+
+export type MembershipStatus = "ACTIVE" | "SUSPENDED";
+
+export type AuthenticationMethod = "SUPABASE" | "TEST";
 
 export type Capability =
   | "claim:read"
@@ -46,6 +51,10 @@ export interface Organisation {
   id: string;
   name: string;
   slug: string;
+  country?: string;
+  website?: string;
+  createdBy?: string;
+  createdAt?: string;
 }
 
 export interface UserRecord {
@@ -60,6 +69,31 @@ export interface Membership {
   organisationId: string;
   role: Role;
   capabilities: Capability[];
+  status?: MembershipStatus;
+  createdBy?: string;
+  createdAt?: string;
+}
+
+export interface OrganisationInvitation {
+  id: string;
+  organisationId: string;
+  emailNormalized: string;
+  role: Role;
+  tokenHash: string;
+  expiresAt: string;
+  acceptedAt?: string;
+  revokedAt?: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface IdentityCommandRecord {
+  userId: string;
+  idempotencyKey: string;
+  commandType: string;
+  organisationId?: string;
+  result: Record<string, unknown>;
+  processedAt: string;
 }
 
 export interface Principal {
@@ -70,6 +104,7 @@ export interface Principal {
   roles: Role[];
   capabilities: Capability[];
   email: string;
+  authenticationMethod: AuthenticationMethod;
 }
 
 export interface PortalPrincipal {

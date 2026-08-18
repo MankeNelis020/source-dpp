@@ -46,6 +46,15 @@ export const ROLE_CAPABILITIES: Record<Role, Capability[]> = {
     "case:resolve",
     "audit:read_internal",
   ],
+  MEMBER: [
+    "claim:read",
+    "evidence:read",
+    "supplier:request",
+    "catalogue:write",
+    "import:manage",
+    "case:read",
+    "case:resolve",
+  ],
   COMPLIANCE_MANAGER: [
     "claim:read",
     "claim:approve",

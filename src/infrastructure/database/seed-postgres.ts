@@ -39,6 +39,7 @@ export async function resetAndSeedPostgres(migrator: Pool) {
   await applyMigrations(migrator);
   await migrator.query(`
     TRUNCATE
+      identity_commands, organisation_invitations,
       outbox_events, rate_limit_windows, shareable_trust_objects, audit_events, processed_commands,
       import_job_events, import_jobs, evidence_objects, sessions, supplier_portal_grants,
       engine_states, memberships, users, organisations
@@ -57,8 +58,15 @@ export async function resetAndSeedPostgres(migrator: Pool) {
   }
   for (const membership of memory.memberships) {
     await migrator.query(
-      "INSERT INTO memberships (id, user_id, organisation_id, role, capabilities) VALUES ($1,$2,$3,$4,$5)",
-      [membership.id, membership.userId, membership.organisationId, membership.role, membership.capabilities.length ? membership.capabilities : ROLE_CAPABILITIES[membership.role]]
+      "INSERT INTO memberships (id, user_id, organisation_id, role, capabilities, status) VALUES ($1,$2,$3,$4,$5,$6)",
+      [
+        membership.id,
+        membership.userId,
+        membership.organisationId,
+        membership.role,
+        membership.capabilities.length ? membership.capabilities : ROLE_CAPABILITIES[membership.role],
+        membership.status ?? "ACTIVE",
+      ]
     );
   }
   for (const [orgId, state] of memory.engines) {

@@ -66,8 +66,18 @@ export function resetRuntimeForTests() {
   bootError = undefined;
 }
 
+/**
+ * HMAC demo login is retired. Preview/production never allow it.
+ * Classification: REMOVE. Local/CI use TestIdentityProvider, not this flag.
+ */
 export function demoAuthEnabled(): boolean {
-  return process.env.NODE_ENV !== "production" || process.env.SOURCE_DEMO_AUTH === "1";
+  try {
+    const env = loadSourceEnvironment();
+    if (env.runtime === "preview" || env.runtime === "production") return false;
+  } catch {
+    return false;
+  }
+  return false;
 }
 
 /**

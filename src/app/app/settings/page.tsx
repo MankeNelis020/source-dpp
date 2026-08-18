@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { DEMO_ORG } from "@/lib/source/demo-data";
 import { PageHeader } from "@/components/source/page-header";
 import { SourceLabel } from "@/components/source/ui";
+import { useSourceQuery } from "@/client/source/api";
+import Link from "next/link";
 
 const TABS = [
   "Organisation",
@@ -19,8 +20,9 @@ const TABS = [
 ] as const;
 
 const ROLES = [
-  ["Owner", "Everything."],
+  ["Owner", "Everything in this organisation."],
   ["Admin", "Organisation and configuration."],
+  ["Member", "Catalogue, cases, and supplier requests."],
   ["Compliance Manager", "Datasets, claims, evidence, exports."],
   ["Procurement Manager", "Suppliers and requests."],
   ["Data Steward", "Identity and evidence review."],
@@ -29,6 +31,17 @@ const ROLES = [
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<(typeof TABS)[number]>("Organisation");
+  const { data: session } = useSourceQuery<{
+    memberships?: { organisationId: string; name: string; role: string }[];
+    organisationId?: string;
+    email?: string;
+  }>("/api/session");
+  const { data: workspace } = useSourceQuery<{ organisation: { name: string } }>("/api/source/workspace");
+  const organisationName =
+    workspace?.organisation.name ??
+    session?.memberships?.find((row) => row.organisationId === session.organisationId)?.name ??
+    "Your organisation";
+
   return (
     <div className="mx-auto max-w-5xl">
       <PageHeader title="Settings" />
@@ -47,10 +60,8 @@ export default function SettingsPage() {
       <div className="border border-[#101A15]/10 bg-[#FBFCFA] p-6 text-[13px] leading-relaxed">
         {tab === "Organisation" ? (
           <div className="space-y-2">
-            <Row k="Legal name" v={DEMO_ORG.legalName} />
-            <Row k="KVK" v={DEMO_ORG.kvk} />
-            <Row k="VAT" v={DEMO_ORG.vat} />
-            <Row k="Country" v={DEMO_ORG.country} />
+            <Row k="Organisation" v={organisationName} />
+            <Row k="Signed in as" v={session?.email ?? ""} />
           </div>
         ) : null}
         {tab === "Roles" ? (
@@ -64,18 +75,13 @@ export default function SettingsPage() {
           </ul>
         ) : null}
         {tab === "Security" ? (
-          <p>MFA for admins. Scoped magic links. Session revoke. EU data residency. Tenant isolation.</p>
+          <p>Supabase authenticates the human. SOURCE authorizes from organisation membership rows, not user_metadata.</p>
         ) : null}
         {tab === "Billing" ? (
-          <p>421 / 500 active supplier relationships · Core plan. Catalogue tier and storage are secondary meters.</p>
+          <p>Billing is not part of this workspace yet.</p>
         ) : null}
         {tab === "Audit log" ? (
-          <ul className="space-y-2 font-[family-name:var(--font-plex)] text-[12px]">
-            <li>15 Aug · Evidence uploaded · cert-92831.pdf</li>
-            <li>15 Aug · Identity matched · Supplier A GmbH</li>
-            <li>14 Aug · Request sent · Supplier A</li>
-            <li>12 Aug · CSV sync · 8,421 products</li>
-          </ul>
+          <p className="text-[#101A15]/65">Tenant audit is available to owners, admins, and auditors from internal APIs.</p>
         ) : null}
         {tab === "API" ? (
           <p>Versioned endpoints under /v1. Webhooks for claim.updated, request.completed, permission.granted.</p>
@@ -83,7 +89,14 @@ export default function SettingsPage() {
         {tab === "Datasets" ? (
           <p>ESPR Aluminium 2027 · required properties versioned. New delegated acts add properties without a database rewrite.</p>
         ) : null}
-        {tab === "Members" || tab === "Data policies" || tab === "Permission defaults" ? (
+        {tab === "Members" ? (
+          <p>
+            <Link href="/app/settings/team" className="underline-offset-4 hover:underline">
+              Open team settings
+            </Link>
+          </p>
+        ) : null}
+        {tab === "Data policies" || tab === "Permission defaults" ? (
           <p className="text-[#101A15]/65">
             Data belongs to owner_actor_id, not user_id. Offboarding never deletes provenance.
           </p>

@@ -3,7 +3,7 @@ import { resolvePortalPrincipal } from "@/server/source/portal";
 import { getSupplierPortalView } from "@/server/source/queries";
 import { jsonError } from "../../source/_lib";
 
-export async function GET(_request: Request, context: { params: Promise<{ token: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ token: string }> }) {
   try {
     const { token } = await context.params;
     const store = getPersistence();

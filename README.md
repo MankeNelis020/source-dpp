@@ -5,7 +5,8 @@ The Missing Information Engine. Connect your product system. SOURCE detects what
 This repository is a strangler migration of the Missing Information Engine: domain behaviour stays in `src/domain/source`, while business truth, authorization, and persistence live in `src/server/source`. The browser consumes authorized projections — not the full engine state.
 
 See `docs/architecture/p0-production.md` for the P0 audit, schema, threat model, and test plan.
-See `docs/operations/environments.md` for local, preview, and production persistence configuration.
+See `docs/architecture/auth-and-organisations.md` for Supabase Auth and organisation membership.
+See `docs/operations/environments.md` for local, preview, and production configuration.
 
 ```bash
 npm install
@@ -20,8 +21,8 @@ Open [http://localhost:3000](http://localhost:3000).
 |---|---|
 | `/` | Public homepage |
 | `/product` `/how-it-works` `/suppliers` `/pricing` `/developers` | Marketing pages |
-| `/signup` `/login` `/onboarding` | Organisation flow |
-| `/app` | Manufacturer workspace (demo data) |
+| `/signup` `/login` `/verify-email` `/forgot-password` `/onboarding/organisation` | Auth and first organisation |
+| `/app` | Manufacturer workspace (empty until you import) |
 | `/app/missing` | Resolution cases — missing information |
 | `/s/demo` | Supplier request (no account wall; first-class unhappy actions) |
 

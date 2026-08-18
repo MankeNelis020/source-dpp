@@ -25,7 +25,6 @@ jobs:
     env:
       DATABASE_URL: postgres://source:source@localhost:5432/source
       SOURCE_REQUIRE_POSTGRES: "1"
-      SOURCE_DEMO_AUTH: "1"
       SOURCE_SESSION_SECRET: ci-session-secret-not-for-production
       SOURCE_OPAQUE_REF_SECRET: ci-opaque-ref-secret
     steps:

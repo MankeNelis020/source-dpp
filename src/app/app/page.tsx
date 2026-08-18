@@ -29,6 +29,23 @@ export default function OverviewPage() {
   }>("/api/source/workboard");
 
   const summary = data?.summary;
+  const empty =
+    data &&
+    data.liveCounts.products === 0 &&
+    data.liveCounts.requirements === 0 &&
+    data.liveCounts.suppliers === 0;
+
+  if (empty) {
+    return (
+      <div className="mx-auto max-w-2xl py-8">
+        <PageHeader
+          title="Your workspace is ready."
+          description="Upload the data you already have. SOURCE will work out what's missing."
+        />
+        <SourceButton href="/app/import">Import catalogue</SourceButton>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-5xl">

@@ -1,102 +1,91 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { writeSession } from "@/lib/session";
-import { SourceWordmark } from "@/components/source/wordmark";
-import { SourceButton, SourceLabel } from "@/components/source/ui";
+import { createBrowserSupabaseClient } from "@/infrastructure/auth/supabase/browser";
+import { SourceButton } from "@/components/source/ui";
+import { AuthChrome, AuthField } from "@/components/source/auth-chrome";
+import { api } from "@/client/source/api";
+import { safeNextPath } from "@/lib/source/safe-next";
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [stage, setStage] = useState<"email" | "password">("email");
-  const [notice, setNotice] = useState<string | null>(null);
-  const nextPath = searchParams.get("next");
-  const safeNext =
-    nextPath && nextPath.startsWith("/") && !nextPath.startsWith("//") ? nextPath : "/app";
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [provider, setProvider] = useState<"supabase" | "test">("test");
+  const nextPath = safeNextPath(searchParams.get("next"));
+
+  useEffect(() => {
+    void api<{ identityProvider: "supabase" | "test" }>("/api/auth/config")
+      .then((data) => setProvider(data.identityProvider))
+      .catch(() => setProvider("test"));
+  }, []);
+
+  async function onSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    setPending(true);
+    setError(null);
+    try {
+      if (provider === "supabase") {
+        const supabase = createBrowserSupabaseClient();
+        const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+        if (signInError) {
+          setError("We couldn't sign you in. Check your email and password.");
+          return;
+        }
+      } else {
+        await api("/api/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ email, password }),
+        });
+      }
+      const session = await api<{ nextPath?: string; emailVerified?: boolean; authenticated: boolean }>(
+        "/api/session"
+      );
+      if (!session.authenticated) {
+        router.push("/login");
+        return;
+      }
+      router.push(safeNextPath(nextPath !== "/app" ? nextPath : session.nextPath));
+      router.refresh();
+    } catch {
+      setError("We couldn't sign you in. Check your email and password.");
+    } finally {
+      setPending(false);
+    }
+  }
 
   return (
-    <div className="mx-auto flex min-h-[70vh] max-w-md flex-col justify-center px-5 py-16">
-      <SourceWordmark size="lg" />
-      <h1 className="mt-10 font-[family-name:var(--font-space)] text-[28px] font-medium tracking-[-0.02em]">
-        Sign in to SOURCE
-      </h1>
-      <form
-        className="mt-8 space-y-4"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (stage === "email") {
-            setStage("password");
-            return;
-          }
-          writeSession({
-            email,
-            organisation: email.toLowerCase().includes("nordic") ? "Nordic Chairs Oy" : "Acme Manufacturing B.V.",
-          });
-          void fetch("/api/auth/login", {
-            method: "POST",
-            credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email }),
-          }).then(() => router.push(safeNext));
-        }}
-      >
-        <div>
-          <SourceLabel>Work email</SourceLabel>
-          <input
-            id="email"
-            type="email"
-            autoComplete="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="mt-2 w-full rounded-sm border border-[#101A15]/15 bg-[#FBFCFA] px-3 py-2.5 text-[13px] outline-none focus:border-[#0B6E50]"
-          />
-        </div>
-        {stage === "password" ? (
-          <div>
-            <SourceLabel>Password</SourceLabel>
-            <input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="mt-2 w-full rounded-sm border border-[#101A15]/15 bg-[#FBFCFA] px-3 py-2.5 text-[13px] outline-none focus:border-[#0B6E50]"
-            />
-          </div>
-        ) : null}
-        <SourceButton type="submit" className="w-full">
-          {stage === "email" ? "Continue" : "Sign in"}
+    <AuthChrome title="Welcome back">
+      <form className="space-y-4" onSubmit={(event) => void onSubmit(event)}>
+        <AuthField label="Work email" type="email" autoComplete="email" required value={email} onChange={setEmail} />
+        <AuthField
+          label="Password"
+          type="password"
+          autoComplete="current-password"
+          required
+          minLength={8}
+          value={password}
+          onChange={setPassword}
+        />
+        {error ? <p className="text-[13px] text-[#B26B2C]">{error}</p> : null}
+        <SourceButton type="submit" className="w-full" disabled={pending}>
+          {pending ? "Signing in…" : "Sign in"}
         </SourceButton>
       </form>
-      <div className="mt-6 space-y-2">
-        <SourceButton variant="ghost" className="w-full" onClick={() => setNotice("Microsoft sign-in is available on Scale.")}>
-          Continue with Microsoft
-        </SourceButton>
-        <SourceButton variant="ghost" className="w-full" onClick={() => setNotice("Google sign-in is available on Scale.")}>
-          Continue with Google
-        </SourceButton>
-        <button
-          type="button"
-          className="w-full py-2 text-center text-[12px] text-[#101A15]/55 hover:text-[#101A15]"
-          onClick={() => setNotice("Company SSO appears for Scale and Enterprise.")}
-        >
-          Use company SSO
-        </button>
-      </div>
-      {notice ? <p className="mt-4 text-center text-[12px] text-[#101A15]/60">{notice}</p> : null}
-      <p className="mt-8 text-center text-[13px] text-[#101A15]/60">
-        No account?{" "}
-        <Link href="/signup" className="text-[#101A15] underline-offset-4 hover:underline">
-          Create one
+      <div className="mt-6 space-y-2 text-center text-[13px]">
+        <Link href="/forgot-password" className="block text-[#101A15]/60 underline-offset-4 hover:underline">
+          Forgot password?
         </Link>
-      </p>
-    </div>
+        <Link href="/signup" className="block text-[#101A15] underline-offset-4 hover:underline">
+          Create an account
+        </Link>
+      </div>
+    </AuthChrome>
   );
 }
 

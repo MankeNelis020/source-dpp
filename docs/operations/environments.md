@@ -75,7 +75,8 @@ Local explicit Postgres: `SOURCE_PERSISTENCE=postgres` plus `SOURCE_APP_DATABASE
 | Name | Purpose |
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL. Required in preview and production. Not a secret. |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Optional. Reserved for Auth (next milestone). Client-safe. |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Required in preview and production. Client-safe Auth anon key. |
+| `NEXT_PUBLIC_SOURCE_APP_URL` | Public app origin for Auth redirects (preview vs production). |
 
 ### Server-only (never put in client bundles)
 
@@ -86,7 +87,10 @@ Local explicit Postgres: `SOURCE_PERSISTENCE=postgres` plus `SOURCE_APP_DATABASE
 | `SOURCE_SESSION_SECRET` | Application runtime | Signed session cookies. |
 | `SOURCE_OPAQUE_REF_SECRET` | Application runtime | Opaque evidence refs. |
 | `SOURCE_STORAGE_SIGNING_SECRET` | Application runtime | Temporary evidence URL HMAC. Storage bytes themselves are PR B2. |
-| `SUPABASE_SERVICE_ROLE_KEY` | Not used for domain I/O | Must never reach the browser. Must never bypass SOURCE authorization. Auth is the next PR. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Unused in PR A | Not used for domain I/O. Must never reach the browser. |
+| `SOURCE_IDENTITY_PROVIDER` | Local only | `supabase` \| `test`. Rejected in preview/production if `test`. |
+| `SOURCE_INVITATION_TTL_DAYS` | Application runtime | Invitation expiry. Default `7`. |
+| `SOURCE_EXPOSE_INVITE_LINKS` | Local only | Returns invite URLs for tests. Never set in preview/production. |
 | `SOURCE_ENV` | Process | `local` \| `preview` \| `production` |
 | `SOURCE_PERSISTENCE` | Local only | `memory` \| `postgres`. Rejected in preview/production if `memory`. |
 | `SOURCE_PG_POOL_MAX` | Application runtime | Optional pg pool size. Default `3`. |
@@ -113,6 +117,8 @@ Do not paste secret values into chat, git, or this file.
 ```text
 SOURCE_ENV=preview
 NEXT_PUBLIC_SUPABASE_URL=https://hhuurdzzsinzwbkkokzz.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<Preview Supabase anon key>
+NEXT_PUBLIC_SOURCE_APP_URL=<Preview app URL>
 SOURCE_APP_DATABASE_URL=<transaction pooler DSN as source_app>
 SOURCE_SESSION_SECRET=<preview secret>
 SOURCE_OPAQUE_REF_SECRET=<preview secret>
@@ -126,6 +132,8 @@ SOURCE_STORAGE_SIGNING_SECRET=<preview secret>
 ```text
 SOURCE_ENV=production
 NEXT_PUBLIC_SUPABASE_URL=https://vezhdbzizniurehclxpg.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<Production Supabase anon key>
+NEXT_PUBLIC_SOURCE_APP_URL=<Production app URL>
 SOURCE_APP_DATABASE_URL=<transaction pooler DSN as source_app>
 SOURCE_SESSION_SECRET=<production secret>
 SOURCE_OPAQUE_REF_SECRET=<production secret>
@@ -222,7 +230,9 @@ ImportJob **metadata and events** survive. Do not treat raw upload bytes as dura
 
 Email remains outbox-only. Resend is PR C. B1 only proves queued communication survives process restart.
 
-Demo principal/auth may still be used while Auth (PR A) is pending. Tenant context for authorization still comes from the server-resolved principal, not from an `organisationId` in the browser body.
+Demo HMAC login is **removed**. Preview/production use Supabase Auth (`SupabaseIdentityProvider`). Local/CI may use `TestIdentityProvider`. Tenant context still comes from membership rows, never from browser `organisationId` or `user_metadata`.
+
+See `docs/architecture/auth-and-organisations.md`.
 
 ---
 

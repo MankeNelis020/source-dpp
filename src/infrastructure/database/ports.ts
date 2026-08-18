@@ -6,6 +6,8 @@ import type {
   ImportMappingProfile,
   Membership,
   Organisation,
+  OrganisationInvitation,
+  IdentityCommandRecord,
   ProcessedCommand,
   SupplierPortalGrant,
   UserRecord,
@@ -60,7 +62,17 @@ export interface PersistencePort {
   saveUser(user: UserRecord): MaybePromise<void>;
   getMembership(userId: string, organisationId: string): MaybePromise<Membership | undefined>;
   listMemberships(userId: string): MaybePromise<Membership[]>;
+  listOrganisationMemberships(organisationId: string): MaybePromise<Membership[]>;
   saveMembership(membership: Membership): MaybePromise<void>;
+  countActiveOwners(organisationId: string): MaybePromise<number>;
+
+  saveInvitation(invitation: OrganisationInvitation): MaybePromise<void>;
+  findInvitationByTokenHash(hash: string): MaybePromise<OrganisationInvitation | undefined>;
+  listInvitations(organisationId: string): MaybePromise<OrganisationInvitation[]>;
+  findPendingInvitation(organisationId: string, emailNormalized: string): MaybePromise<OrganisationInvitation | undefined>;
+
+  findIdentityCommand(userId: string, idempotencyKey: string): MaybePromise<IdentityCommandRecord | undefined>;
+  saveIdentityCommand(record: IdentityCommandRecord): MaybePromise<void>;
 
   loadEngine(organisationId: string): MaybePromise<EngineState>;
   saveEngine(organisationId: string, state: EngineState): MaybePromise<void>;

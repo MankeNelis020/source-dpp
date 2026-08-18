@@ -12,7 +12,7 @@ import {
   type OutboxRecord,
 } from "@/infrastructure/outbox/types";
 import { METRICS, metricInc, logOperational } from "@/infrastructure/observability/metrics";
-import { authorizePortalCommand, authorizeUserCommand } from "../authorization";
+import { authorizePortalCommand, authorizeUserCommand, ROLE_CAPABILITIES } from "../authorization";
 import { propagateReadyClaim } from "@/domain/source/propagation";
 import { structuredCommandAudit } from "../audit";
 import type { AnyPrincipal, CommandEnvelope, CommandOutcome, Principal } from "../types";
@@ -93,15 +93,18 @@ async function consumePortalLimits(args: {
 export async function resolveUserPrincipal(store: PersistencePort, userId: string, organisationId: string): Promise<Principal> {
   const user = await store.getUserById(userId);
   const membership = await store.getMembership(userId, organisationId);
-  if (!user || !membership) throw new SourceError("UNAUTHENTICATED", "Sign in required.", 401);
+  if (!user || !membership || membership.status === "SUSPENDED") {
+    throw new SourceError("UNAUTHENTICATED", "Sign in required.", 401);
+  }
   return {
     kind: "user",
     userId,
     organisationId,
     membershipId: membership.id,
     roles: [membership.role],
-    capabilities: membership.capabilities,
+    capabilities: membership.capabilities.length ? membership.capabilities : ROLE_CAPABILITIES[membership.role],
     email: user.email,
+    authenticationMethod: "TEST",
   };
 }
 
