@@ -19,7 +19,7 @@ async function main() {
   if (roleName(postgresUrlUser(url)) === "source_app") {
     throw new SourceEnvironmentError("db:seed must use migrator credentials, not source_app.");
   }
-  const pool = createPostgresPool(url, "migrator");
+  const pool = createPostgresPool(url, "migrator", { ca: env.supabaseDbCaCert });
   try {
     await resetAndSeedPostgres(pool);
     console.log("SOURCE local demo seed applied. This must not run in preview or production.");

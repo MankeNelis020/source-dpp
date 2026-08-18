@@ -83,6 +83,7 @@ Local explicit Postgres: `SOURCE_PERSISTENCE=postgres` plus `SOURCE_APP_DATABASE
 | Name | Who uses it | Purpose |
 |---|---|---|
 | `SOURCE_APP_DATABASE_URL` | Application runtime | Restricted `source_app` role. Reads/writes tenant data under RLS. |
+| `SUPABASE_DB_CA_CERT` | Application runtime and hosted migrate job | Server-only PEM CA for Postgres TLS (`pg` `ssl.ca`, `rejectUnauthorized: true`). Required in preview/production. Never `NEXT_PUBLIC_`. Never log. |
 | `SOURCE_MIGRATOR_DATABASE_URL` | `npm run db:migrate` / deploy migrate job only | Higher-privilege DDL. **Not** the serverless app. |
 | `SOURCE_SESSION_SECRET` | Application runtime | Signed session cookies. |
 | `SOURCE_OPAQUE_REF_SECRET` | Application runtime | Opaque evidence refs. |
@@ -135,6 +136,7 @@ NEXT_PUBLIC_SUPABASE_URL=https://hhuurdzzsinzwbkkokzz.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<Preview Supabase anon key>
 NEXT_PUBLIC_SOURCE_APP_URL=<Preview app URL>
 SOURCE_APP_DATABASE_URL=<transaction pooler DSN as source_app>
+SUPABASE_DB_CA_CERT=<PEM from Supabase Database Settings → SSL Configuration>
 SOURCE_SESSION_SECRET=<preview secret>
 SOURCE_OPAQUE_REF_SECRET=<preview secret>
 SOURCE_STORAGE_SIGNING_SECRET=<preview secret>
@@ -156,6 +158,7 @@ NEXT_PUBLIC_SUPABASE_URL=https://vezhdbzizniurehclxpg.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<Production Supabase anon key>
 NEXT_PUBLIC_SOURCE_APP_URL=<Production app URL>
 SOURCE_APP_DATABASE_URL=<transaction pooler DSN as source_app>
+SUPABASE_DB_CA_CERT=<PEM from Supabase Database Settings → SSL Configuration>
 SOURCE_SESSION_SECRET=<production secret>
 SOURCE_OPAQUE_REF_SECRET=<production secret>
 SOURCE_STORAGE_SIGNING_SECRET=<production secret>
@@ -213,6 +216,14 @@ COMMIT
 `FOR UPDATE` on `engine_states` and `FOR UPDATE SKIP LOCKED` inside `claim_outbox_batch` run inside a transaction, so they are compatible with transaction-mode pooling.
 
 If a pooler username includes the project ref (`source_app.<project-ref>`), SOURCE also uses that ref in the cross-environment assertion. Prefer that username form on Supabase pooler so a swapped DSN cannot hide behind a generic hostname.
+
+### Hosted TLS trust
+
+Preview and production verify the Supabase Postgres certificate chain. SOURCE never sets `rejectUnauthorized: false`.
+
+`SELF_SIGNED_CERT_IN_CHAIN` against the Shared Transaction Pooler means Node does not trust the issuer yet. Fix it by placing this environment's CA in `SUPABASE_DB_CA_CERT` (server-only). Download the certificate from the Supabase Dashboard → Database Settings → SSL Configuration. Escaped `\n` PEM newlines (Vercel) are decoded at boot.
+
+Do not paste the PEM into chat, git, health payloads, or logs. Local/CI `DATABASE_URL` to isolated Postgres does not use SSL and does not require this variable.
 
 ---
 
@@ -294,11 +305,12 @@ Migrations create `source_app` and RLS when applied with migrator credentials. A
 4. Put **production** migrator credentials in the production migrate job only.
 5. After first migrate on each project: `ALTER ROLE source_app PASSWORD …` to a per-project secret (do not keep `source_app_dev_only` in hosted environments).
 6. Confirm database network allow-list / Supabase connectivity so Vercel can reach the pooler.
-7. Confirm Preview env has the **dev** `NEXT_PUBLIC_SUPABASE_URL` and Production has the **prod** URL.
-8. Never copy production DSNs into Preview, and never point CI at Supabase.
-9. Put **this environment's** `SUPABASE_SERVICE_ROLE_KEY` in Vercel (Preview key from preview project, Production key from production project). Never mix.
-10. Create private buckets `source-imports` and `source-evidence` (`npm run storage:bootstrap` or dashboard). They must not be public.
-11. Place Resend keys, webhook secret, From address, and `CRON_SECRET` per environment. Preview stays `SOURCE_EMAIL_MODE=test` unless an allow list is intentional. See `docs/operations/email.md`.
+7. Put this environment's `SUPABASE_DB_CA_CERT` in Vercel Preview and Production (and in the hosted migrate job). Download the CA from that project's Database Settings → SSL Configuration. Do not disable TLS verification.
+8. Confirm Preview env has the **dev** `NEXT_PUBLIC_SUPABASE_URL` and Production has the **prod** URL.
+9. Never copy production DSNs into Preview, and never point CI at Supabase.
+10. Put **this environment's** `SUPABASE_SERVICE_ROLE_KEY` in Vercel (Preview key from preview project, Production key from production project). Never mix.
+11. Create private buckets `source-imports` and `source-evidence` (`npm run storage:bootstrap` or dashboard). They must not be public.
+12. Place Resend keys, webhook secret, From address, and `CRON_SECRET` per environment. Preview stays `SOURCE_EMAIL_MODE=test` unless an allow list is intentional. See `docs/operations/email.md`.
 
 Until hosted Resend credentials and a verified domain exist, CI uses `TestEmailProvider`. Live preview/production sending is blocked on that human placement — not on application code.
 

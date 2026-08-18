@@ -17,6 +17,13 @@ const SECRETS = {
   CRON_SECRET: "test-cron-secret-not-for-production",
 };
 
+const DUMMY_DB_CA = "-----BEGIN CERTIFICATE-----\nTEST-NOT-A-REAL-CA\n-----END CERTIFICATE-----";
+
+const HOSTED = {
+  ...SECRETS,
+  SUPABASE_DB_CA_CERT: DUMMY_DB_CA,
+};
+
 const PRODUCTION_EMAIL = {
   RESEND_API_KEY: "re_test_not_a_real_key",
   SOURCE_EMAIL_FROM: "SOURCE <requests@mail.example.test>",
@@ -38,6 +45,8 @@ function expectConfigError(fn: () => unknown, pattern: RegExp) {
     expect(message).toMatch(pattern);
     expect(message).not.toContain("super-secret-password");
     expect(message).not.toMatch(/postgres(?:ql)?:\/\//i);
+    expect(message).not.toContain("BEGIN CERTIFICATE");
+    expect(message).not.toContain("TEST-NOT-A-REAL-CA");
   }
 }
 
@@ -164,7 +173,7 @@ describe("SOURCE environment isolation", () => {
         VERCEL_ENV: "preview",
         NEXT_PUBLIC_SUPABASE_URL: DEV_PREVIEW_SUPABASE_URL,
         SOURCE_APP_DATABASE_URL: DEV_APP_URL,
-        ...SECRETS,
+        ...HOSTED,
       }).runtime
     ).toBe("preview");
     expect(
@@ -172,7 +181,7 @@ describe("SOURCE environment isolation", () => {
         VERCEL_ENV: "production",
         NEXT_PUBLIC_SUPABASE_URL: PRODUCTION_SUPABASE_URL,
         SOURCE_APP_DATABASE_URL: PROD_APP_URL,
-        ...SECRETS,
+        ...HOSTED,
         ...PRODUCTION_EMAIL,
       }).runtime
     ).toBe("production");
@@ -248,7 +257,7 @@ describe("SOURCE environment isolation", () => {
       SOURCE_ENV: "preview",
       NEXT_PUBLIC_SUPABASE_URL: DEV_PREVIEW_SUPABASE_URL,
       SOURCE_APP_DATABASE_URL: DEV_APP_URL,
-      ...SECRETS,
+      ...HOSTED,
     });
     expect(env.objectStorage).toBe("supabase");
     expect(env.importBucket).toBe("source-imports");
@@ -259,7 +268,7 @@ describe("SOURCE environment isolation", () => {
       SOURCE_ENV: "preview",
       NEXT_PUBLIC_SUPABASE_URL: DEV_PREVIEW_SUPABASE_URL,
       SOURCE_APP_DATABASE_URL: DEV_APP_URL,
-      ...SECRETS,
+      ...HOSTED,
     });
     expect(preview.emailMode).toBe("test");
     expect(preview.emailProvider).toBe("test");
@@ -275,6 +284,44 @@ describe("SOURCE environment isolation", () => {
         }),
       /SOURCE_EMAIL_ALLOWED_RECIPIENTS/
     );
+  });
+
+  it("fails closed when hosted Postgres runtime is missing SUPABASE_DB_CA_CERT", () => {
+    expectConfigError(
+      () =>
+        loadSourceEnvironment({
+          SOURCE_ENV: "preview",
+          NEXT_PUBLIC_SUPABASE_URL: DEV_PREVIEW_SUPABASE_URL,
+          SOURCE_APP_DATABASE_URL: DEV_DSN_WITH_REF,
+          ...SECRETS,
+        }),
+      /SUPABASE_DB_CA_CERT is required for hosted Postgres TLS/
+    );
+    expect(() =>
+      createPersistence({
+        runtime: "preview",
+        persistence: "postgres",
+        identityProvider: "supabase",
+        objectStorage: "supabase",
+        appDatabaseUrl: DEV_DSN_WITH_REF,
+        invitationTtlDays: 7,
+        importBucket: "source-imports",
+        evidenceBucket: "source-evidence",
+        signedReadTtlSeconds: 300,
+        tempUploadTtlHours: 24,
+      })
+    ).toThrow(/SUPABASE_DB_CA_CERT is required for hosted Postgres TLS/);
+  });
+
+  it("decodes escaped PEM newlines for hosted Postgres TLS without exposing the certificate", () => {
+    const env = loadSourceEnvironment({
+      SOURCE_ENV: "preview",
+      NEXT_PUBLIC_SUPABASE_URL: DEV_PREVIEW_SUPABASE_URL,
+      SOURCE_APP_DATABASE_URL: DEV_APP_URL,
+      ...SECRETS,
+      SUPABASE_DB_CA_CERT: "-----BEGIN CERTIFICATE-----\\nTEST-NOT-A-REAL-CA\\n-----END CERTIFICATE-----",
+    });
+    expect(env.supabaseDbCaCert).toBe(DUMMY_DB_CA);
   });
 
   it("refuses production SOURCE_EMAIL_MODE=test", () => {

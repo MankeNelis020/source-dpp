@@ -50,6 +50,12 @@ export interface SourceEnvironment {
    * Service role bypasses Storage RLS — SOURCE policy decides first.
    */
   supabaseServiceRoleKey?: string;
+  /**
+   * Server-only PEM CA for hosted Postgres TLS (pg Pool `ssl.ca`).
+   * Never NEXT_PUBLIC_. Never log or include in health/error payloads.
+   * Required for preview/production Postgres runtime.
+   */
+  supabaseDbCaCert?: string;
   appPublicUrl?: string;
   invitationTtlDays: number;
   importBucket: string;
@@ -106,6 +112,7 @@ export function loadSourceEnvironment(
   const outboxMaxAttempts = positiveInt(env.SOURCE_OUTBOX_MAX_ATTEMPTS, 5);
   const emailMode = resolveEmailMode(runtime, env);
   const emailProvider = resolveEmailProvider(runtime, env, emailMode);
+  const supabaseDbCaCert = decodePemEnv(env.SUPABASE_DB_CA_CERT);
 
   assertProjectIsolation({
     runtime,
@@ -134,6 +141,7 @@ export function loadSourceEnvironment(
           "SOURCE environment configuration mismatch: NEXT_PUBLIC_SUPABASE_URL is required."
         );
       }
+      assertHostedPostgresTls(supabaseDbCaCert);
     }
     return {
       runtime,
@@ -145,6 +153,7 @@ export function loadSourceEnvironment(
       migratorDatabaseUrl,
       supabaseAnonKey,
       supabaseServiceRoleKey,
+      supabaseDbCaCert,
       appPublicUrl,
       invitationTtlDays: Number.isFinite(invitationTtlDays) && invitationTtlDays > 0 ? invitationTtlDays : 7,
       importBucket,
@@ -217,6 +226,7 @@ export function loadSourceEnvironment(
     }
     assertEmailPolicy({ runtime, emailMode, emailProvider, resendApiKey, emailFrom, resendWebhookSecret, emailAllowedRecipients });
     assertAppRole(appDatabaseUrl);
+    assertHostedPostgresTls(supabaseDbCaCert);
   }
 
   if (objectStorage === "supabase") {
@@ -255,6 +265,7 @@ export function loadSourceEnvironment(
     migratorDatabaseUrl,
     supabaseAnonKey,
     supabaseServiceRoleKey,
+    supabaseDbCaCert,
     appPublicUrl,
     invitationTtlDays: Number.isFinite(invitationTtlDays) && invitationTtlDays > 0 ? invitationTtlDays : 7,
     importBucket,
@@ -537,6 +548,23 @@ function assertMigratorRole(url: string) {
       "SOURCE environment configuration mismatch: SOURCE_MIGRATOR_DATABASE_URL must not use the runtime source_app role."
     );
   }
+}
+
+function assertHostedPostgresTls(ca: string | undefined) {
+  if (!ca) {
+    throw new SourceEnvironmentError(
+      "SOURCE environment configuration mismatch: SUPABASE_DB_CA_CERT is required for hosted Postgres TLS."
+    );
+  }
+}
+
+/**
+ * PEM from Vercel/env may use literal `\n` sequences. Never log the result.
+ */
+function decodePemEnv(value: string | undefined): string | undefined {
+  const next = trim(value);
+  if (!next) return undefined;
+  return next.replace(/\\n/g, "\n");
 }
 
 function trim(value: string | undefined): string | undefined {
