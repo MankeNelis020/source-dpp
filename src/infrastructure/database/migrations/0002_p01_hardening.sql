@@ -97,7 +97,9 @@ REVOKE UPDATE, DELETE ON audit_events FROM PUBLIC;
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'source_app') THEN
-    CREATE ROLE source_app LOGIN PASSWORD 'source_app_dev_only';
+    -- Hosted environments must set a unique password out-of-band after migration.
+    -- Never ship a repository-known default password for the runtime role.
+    CREATE ROLE source_app LOGIN;
   END IF;
 END
 $$;
