@@ -162,7 +162,14 @@ export async function bootSourceRuntime(): Promise<RuntimePersistence> {
   }
   const storageStatus = await storageHealthStatus();
   if (runtime.kind === "postgres" && runtime.pool) {
-    lastHealth = { ...(await checkPostgresHealth(runtime.pool)), storage: storageStatus };
+    const env = getSourceEnvironment();
+    lastHealth = {
+      ...(await checkPostgresHealth(runtime.pool, {
+        connectionString: env.appDatabaseUrl,
+        sourceEnv: env.runtime,
+      })),
+      storage: storageStatus,
+    };
   } else {
     lastHealth = { ...memoryHealth(), storage: storageStatus };
   }
