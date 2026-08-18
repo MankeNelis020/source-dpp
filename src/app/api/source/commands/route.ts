@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getMemoryPersistence } from "@/infrastructure/database/memory";
+import { getPersistence, getRuntimeRateLimiter } from "@/infrastructure/runtime";
 import { dispatchCommand } from "@/server/source/commands/dispatch";
 import type { CommandEnvelope } from "@/server/source/types";
 import { jsonError, originAllowed, principalFromRequest } from "../_lib";
@@ -10,8 +10,8 @@ export async function POST(request: NextRequest) {
     const principal = await principalFromRequest();
     const body = (await request.json()) as Partial<CommandEnvelope>;
     if (!body.command) return Response.json({ error: "VALIDATION", message: "command required" }, { status: 400 });
-    const outcome = dispatchCommand({
-      store: getMemoryPersistence(),
+    const outcome = await dispatchCommand({
+      store: getPersistence(),
       principal,
       envelope: {
         commandId: body.commandId ?? crypto.randomUUID(),
@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
         expectedVersion: body.expectedVersion,
         command: body.command,
       },
+      rateLimiter: getRuntimeRateLimiter(),
     });
     return Response.json(outcome);
   } catch (error) {

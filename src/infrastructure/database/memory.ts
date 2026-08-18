@@ -1,9 +1,10 @@
 import { ROLE_CAPABILITIES } from "@/server/source/authorization";
 import type { EngineState } from "@/domain/source/types";
 import { createSeedState, emptyState } from "@/domain/source";
-import { hashToken } from "@/infrastructure/crypto/tokens";
+import { hashToken, hashesEqual } from "@/infrastructure/crypto/tokens";
+import type { OutboxRecord, OutboxStatus } from "@/infrastructure/outbox/types";
 import { PORTAL_ALLOWED_DEFAULT, type ImportJob, type ImportJobEvent, type ImmutableAuditEvent, type Membership, type Organisation, type ProcessedCommand, type SupplierPortalGrant, type UserRecord } from "@/server/source/types";
-import type { EvidenceObject, PersistencePort } from "./ports";
+import type { EvidenceObject, PersistencePort, SessionRecord, ShareableTrustCandidate } from "./ports";
 
 const DEMO_EXPIRY = "2027-08-17T00:00:00.000Z";
 
@@ -114,7 +115,10 @@ export class MemoryPersistence implements PersistencePort {
   importJobs = new Map<string, ImportJob>();
   importEvents = new Map<string, ImportJobEvent[]>();
   evidence = new Map<string, EvidenceObject>();
+  outbox: OutboxRecord[] = [];
+  sessions = new Map<string, SessionRecord>();
   seq = 1;
+  private chain: Promise<unknown> = Promise.resolve();
 
   constructor() {
     this.reset();
@@ -213,6 +217,8 @@ export class MemoryPersistence implements PersistencePort {
     this.importJobs.clear();
     this.importEvents.clear();
     this.evidence.clear();
+    this.outbox = [];
+    this.sessions.clear();
     this.seq = 1000;
   }
 
@@ -254,7 +260,7 @@ export class MemoryPersistence implements PersistencePort {
     this.processed.set(`${record.organisationId}:${record.idempotencyKey}`, record);
   }
   findPortalGrantByTokenHash(hash: string) {
-    return this.portalGrants.find((g) => g.tokenHash === hash);
+    return this.portalGrants.find((g) => hashesEqual(g.tokenHash, hash));
   }
   savePortalGrant(grant: SupplierPortalGrant) {
     const idx = this.portalGrants.findIndex((g) => g.id === grant.id);
@@ -300,6 +306,109 @@ export class MemoryPersistence implements PersistencePort {
   nextId(prefix: string) {
     this.seq += 1;
     return `${prefix}-${this.seq}`;
+  }
+
+  async transaction<T>(fn: (tx: PersistencePort) => Promise<T> | T): Promise<T> {
+    const run = this.chain.then(() => fn(this));
+    this.chain = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  insertOutbox(record: OutboxRecord): boolean {
+    const exists = this.outbox.some(
+      (row) => row.organisationId === record.organisationId && row.semanticKey === record.semanticKey
+    );
+    if (exists) return false;
+    this.outbox.push({ ...record });
+    return true;
+  }
+
+  claimOutboxBatch(limit: number, now = new Date()): OutboxRecord[] {
+    const claimed: OutboxRecord[] = [];
+    for (const row of this.outbox) {
+      if (claimed.length >= limit) break;
+      if (row.status !== "PENDING" && row.status !== "FAILED") continue;
+      if (new Date(row.availableAt) > now) continue;
+      row.status = "PROCESSING";
+      claimed.push({ ...row });
+    }
+    return claimed;
+  }
+
+  markOutboxSucceeded(id: string, processedAt = new Date()) {
+    const row = this.outbox.find((item) => item.id === id);
+    if (!row) return;
+    row.status = "SUCCEEDED";
+    row.processedAt = processedAt.toISOString();
+    row.lastError = undefined;
+  }
+
+  markOutboxFailed(id: string, error: string, nextAttemptAt: Date, deadLetter = false) {
+    const row = this.outbox.find((item) => item.id === id);
+    if (!row) return;
+    row.attemptCount += 1;
+    row.lastError = error;
+    row.status = deadLetter ? "DEAD_LETTER" : "FAILED";
+    row.availableAt = nextAttemptAt.toISOString();
+    if (deadLetter) row.processedAt = new Date().toISOString();
+  }
+
+  getOutbox(id: string) {
+    const row = this.outbox.find((item) => item.id === id);
+    return row ? { ...row } : undefined;
+  }
+
+  listOutbox(status?: OutboxStatus, organisationId?: string) {
+    return this.outbox
+      .filter((row) => (!status || row.status === status) && (!organisationId || row.organisationId === organisationId))
+      .map((row) => ({ ...row }));
+  }
+
+  countOutbox(status: OutboxStatus) {
+    return this.outbox.filter((row) => row.status === status).length;
+  }
+
+  saveSession(session: SessionRecord) {
+    this.sessions.set(session.id, { ...session });
+  }
+
+  getSession(id: string) {
+    const session = this.sessions.get(id);
+    return session ? { ...session } : undefined;
+  }
+
+  revokeSession(id: string, at = new Date()) {
+    const session = this.sessions.get(id);
+    if (session) session.revokedAt = at.toISOString();
+  }
+
+  findShareableTrustCandidates(input: {
+    requesterOrganisationId: string;
+    subjectId: string;
+    propertyId: string;
+  }): ShareableTrustCandidate[] {
+    const out: ShareableTrustCandidate[] = [];
+    for (const [orgId, state] of this.engines) {
+      if (orgId === input.requesterOrganisationId) continue;
+      for (const claim of state.claims) {
+        if (claim.subjectId !== input.subjectId || claim.propertyId !== input.propertyId) continue;
+        const evidence = claim.evidenceId ? state.evidence.find((item) => item.id === claim.evidenceId) : undefined;
+        const permission = state.permissions.find((item) => item.claimId === claim.id);
+        out.push({
+          trustLevel: claim.trustLevel,
+          permissionState: claim.permissionState,
+          visibility: permission?.visibility,
+          purpose: claim.purpose,
+          validUntil: claim.validUntil ?? evidence?.validUntil,
+          expired: Boolean(evidence?.expired),
+          identityMatched: true,
+        });
+      }
+    }
+    return out;
   }
 }
 

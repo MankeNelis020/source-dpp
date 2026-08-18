@@ -4,6 +4,18 @@ export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
+/** Non-secret telemetry fingerprint. Never log the raw bearer token. */
+export function tokenFingerprint(token: string): string {
+  return createHash("sha256").update(`fp:${token}`).digest("hex").slice(0, 16);
+}
+
+export function hashesEqual(left: string, right: string): boolean {
+  const a = Buffer.from(left);
+  const b = Buffer.from(right);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
 export function generateBearerToken(): string {
   return randomBytes(32).toString("base64url");
 }

@@ -1,12 +1,12 @@
 import { jsonError, principalFromRequest } from "../../../source/_lib";
-import { getMemoryPersistence } from "@/infrastructure/database/memory";
+import { getPersistence } from "@/infrastructure/runtime";
 import { getImportProgress } from "@/server/source/import/service";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const principal = await principalFromRequest();
     const { id } = await context.params;
-    const progress = getImportProgress(getMemoryPersistence(), principal, id);
+    const progress = await getImportProgress(getPersistence(), principal, id);
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       start(controller) {

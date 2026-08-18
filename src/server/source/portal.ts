@@ -3,11 +3,11 @@ import type { PersistencePort } from "@/infrastructure/database/ports";
 import type { PortalPrincipal } from "./types";
 import { SourceError } from "./types";
 
-export function resolvePortalPrincipal(store: PersistencePort, token: string, now = new Date()): PortalPrincipal {
+export async function resolvePortalPrincipal(store: PersistencePort, token: string, now = new Date()): Promise<PortalPrincipal> {
   if (!token || token.length < 3) {
     throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
   }
-  const grant = store.findPortalGrantByTokenHash(hashToken(token));
+  const grant = await store.findPortalGrantByTokenHash(hashToken(token));
   if (!grant) throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
   if (grant.revokedAt) throw new SourceError("REVOKED", "This link is no longer valid.", 401);
   if (new Date(grant.expiresAt) <= now) throw new SourceError("EXPIRED", "This link has expired.", 401);

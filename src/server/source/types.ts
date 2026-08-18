@@ -28,7 +28,8 @@ export type Capability =
   | "catalogue:write"
   | "import:manage"
   | "case:read"
-  | "case:resolve";
+  | "case:resolve"
+  | "audit:read_internal";
 
 export type PortalCommand =
   | "VIEW_REQUIREMENT"
@@ -116,18 +117,33 @@ export interface ProcessedCommand {
   processedAt: string;
 }
 
+export type AuditView = "internal" | "tenant" | "portal";
+
+export type AuditResult = "success" | "failure";
+
+export interface ProtectedReference {
+  kind: "actor" | "evidence" | "relationship" | "organisation" | "case";
+  opaqueRef: string;
+}
+
 export interface ImmutableAuditEvent {
   id: string;
   organisationId?: string;
   principalId?: string;
   action: string;
+  resourceType?: string;
+  resourceId?: string;
   resource?: string;
-  result: "ok" | "denied" | "error";
+  result: AuditResult | "ok" | "denied" | "error";
   policyVersion?: string;
   commandId?: string;
   requestId?: string;
   reason?: string;
-  detail: string;
+  /** Generated at projection time. Must not be the confidentiality control. */
+  detail?: string;
+  publicContext?: Record<string, unknown>;
+  privateContext?: Record<string, unknown>;
+  protectedReferences?: ProtectedReference[];
   createdAt: string;
 }
 

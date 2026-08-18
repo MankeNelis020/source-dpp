@@ -4,9 +4,14 @@ import type { CaseFilter, EngineState, ResolutionCase, ResolutionCaseState } fro
 import { matchesFilter } from "@/domain/source/queries";
 import type { PersistencePort } from "@/infrastructure/database/ports";
 import { hasCapability } from "./authorization";
-import { isConfidentialActor, projectActor, projectEvidence, safeActorLabel, sanitizeAudit } from "./confidentiality";
+import { isConfidentialActor, projectActor, projectEvidenceForState, safeActorLabel } from "./confidentiality";
+import { evaluateEvidenceDisclosure, hasEvidenceByteAccess, opaqueEvidenceRef, resolveEvidenceIdFromOpaqueRef } from "./disclosure";
+import { projectDomainEvent, projectStructuredAudit } from "./audit";
 import type { Principal, PortalPrincipal } from "./types";
 import { SourceError } from "./types";
+import type { EvidenceStorage } from "@/infrastructure/storage/evidence";
+import { getMemoryEvidenceStorage } from "@/infrastructure/storage/evidence";
+import { METRICS, metricInc, logOperational } from "@/infrastructure/observability/metrics";
 
 const DETECTED: ResolutionCaseState[] = ["DETECTED", "RESOLVING_IDENTITY", "SEARCHING_EXISTING_DATA"];
 const RESOLVING: ResolutionCaseState[] = ["ROUTING", "REVIEW_ROUTING", "RESPONSE_RECEIVED", "VALIDATING", "EVIDENCE_REQUIRED", "RENEWAL_REQUIRED"];
@@ -40,12 +45,12 @@ export interface NeedsYouTask {
   minutesEstimate: number;
 }
 
-function loadTenant(store: PersistencePort, principal: Principal): EngineState {
+function loadTenant(store: PersistencePort, principal: Principal): Promise<EngineState> | EngineState {
   return store.loadEngine(principal.organisationId);
 }
 
-export function getWorkspaceOverview(store: PersistencePort, principal: Principal) {
-  const state = loadTenant(store, principal);
+export async function getWorkspaceOverview(store: PersistencePort, principal: Principal) {
+  const state = await loadTenant(store, principal);
   const cases = state.cases;
   const missing = cases.filter((c) => !RESOLVED.includes(c.state)).length;
   const needsYou = cases.filter((c) => NEEDS_YOU.includes(c.state)).length;
@@ -73,12 +78,12 @@ export function getWorkspaceOverview(store: PersistencePort, principal: Principa
       .slice()
       .reverse()
       .slice(0, 12)
-      .map((e) => sanitizeAudit(state, e)),
+      .map((e) => projectDomainEvent(state, e, "tenant")),
   };
 }
 
-export function getResolutionWorkboard(store: PersistencePort, principal: Principal) {
-  const state = loadTenant(store, principal);
+export async function getResolutionWorkboard(store: PersistencePort, principal: Principal) {
+  const state = await loadTenant(store, principal);
   const bucket = (states: ResolutionCaseState[]) => state.cases.filter((c) => states.includes(c.state)).length;
   return {
     columns: {
@@ -88,7 +93,7 @@ export function getResolutionWorkboard(store: PersistencePort, principal: Princi
       NEEDS_YOU: bucket(NEEDS_YOU) + state.tasks.filter((t) => t.status === "open").length,
       RESOLVED: bucket(RESOLVED) + state.cases.filter((c) => c.state === "UNRESOLVED").length,
     },
-    activity: state.events.slice().reverse().slice(0, 20).map((e) => sanitizeAudit(state, e)),
+    activity: state.events.slice().reverse().slice(0, 20).map((e) => projectDomainEvent(state, e, "tenant")),
     breakdown: {
       sourceCanResolve: {
         reusableEvidence: state.cases.filter((c) => c.state === "AUTHORIZATION_REQUIRED").length,
@@ -105,8 +110,8 @@ export function getResolutionWorkboard(store: PersistencePort, principal: Princi
   };
 }
 
-export function getCaseList(store: PersistencePort, principal: Principal, filter: CaseFilter = "all"): CaseListItem[] {
-  const state = loadTenant(store, principal);
+export async function getCaseList(store: PersistencePort, principal: Principal, filter: CaseFilter = "all"): Promise<CaseListItem[]> {
+  const state = await loadTenant(store, principal);
   return state.cases.filter((c) => matchesFilter(c, filter)).map((c) => toListItem(state, c));
 }
 
@@ -128,14 +133,13 @@ function toListItem(state: EngineState, c: ResolutionCase): CaseListItem {
   };
 }
 
-export function getCaseDetail(store: PersistencePort, principal: Principal, caseId: string) {
-  const state = loadTenant(store, principal);
+export async function getCaseDetail(store: PersistencePort, principal: Principal, caseId: string) {
+  const state = await loadTenant(store, principal);
   const resolution = state.cases.find((c) => c.id === caseId);
   if (!resolution) throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
   const requirement = state.requirements.find((r) => r.id === resolution.requirementId);
   const claim = state.claims.find((c) => c.caseId === caseId);
-  const evidence = claim?.evidenceId ? state.evidence.find((e) => e.id === claim.evidenceId) : undefined;
-  const canPrivate = hasCapability(principal, "evidence:read_private");
+  const evidence = claim?.evidenceId ? state.evidence.find((c) => c.id === claim.evidenceId) : undefined;
   const contacts = state.contacts
     .filter((c) => c.actorId === resolution.currentActorId && !isConfidentialActor(state, c.actorId))
     .map((c) => ({ id: c.id, role: c.role, name: c.name, valid: c.valid }));
@@ -178,7 +182,7 @@ export function getCaseDetail(store: PersistencePort, principal: Principal, case
         parentAttemptId: a.parentAttemptId,
         actor: projectActor(state, a.actorId),
       })),
-    events: state.events.filter((e) => e.caseId === caseId).map((e) => sanitizeAudit(state, e)),
+    events: state.events.filter((e) => e.caseId === caseId).map((e) => projectDomainEvent(state, e, "tenant")),
     tasks: state.tasks.filter((t) => t.caseId === caseId),
     readiness: caseReadiness(state, caseId),
     exception,
@@ -193,13 +197,13 @@ export function getCaseDetail(store: PersistencePort, principal: Principal, case
           permissionState: claim.permissionState,
         }
       : undefined,
-    evidence: projectEvidence(evidence, canPrivate),
+    evidence: projectEvidenceForState(state, evidence, principal.capabilities),
     contacts,
   };
 }
 
-export function getProductBlockers(store: PersistencePort, principal: Principal, productId: string) {
-  const state = loadTenant(store, principal);
+export async function getProductBlockers(store: PersistencePort, principal: Principal, productId: string) {
+  const state = await loadTenant(store, principal);
   const known = new Set(state.requirements.flatMap((r) => r.productIds));
   if (!known.has(productId) && !state.subjects.some((s) => s.id === productId)) {
     throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
@@ -224,9 +228,9 @@ export function getProductBlockers(store: PersistencePort, principal: Principal,
     });
 }
 
-export function getProductDetail(store: PersistencePort, principal: Principal, productId: string) {
-  const blockers = getProductBlockers(store, principal, productId);
-  const state = loadTenant(store, principal);
+export async function getProductDetail(store: PersistencePort, principal: Principal, productId: string) {
+  const blockers = await getProductBlockers(store, principal, productId);
+  const state = await loadTenant(store, principal);
   const subject = state.subjects.find((s) => s.id === productId);
   const children = state.subjectRelationships
     .filter((r) => r.parentSubjectId === productId)
@@ -250,8 +254,8 @@ export function getProductDetail(store: PersistencePort, principal: Principal, p
   };
 }
 
-export function getNeedsYouTasks(store: PersistencePort, principal: Principal): NeedsYouTask[] {
-  const state = loadTenant(store, principal);
+export async function getNeedsYouTasks(store: PersistencePort, principal: Principal): Promise<NeedsYouTask[]> {
+  const state = await loadTenant(store, principal);
   const tasks: NeedsYouTask[] = state.tasks
     .filter((t) => t.status === "open")
     .map((t) => {
@@ -274,8 +278,8 @@ export function getNeedsYouTasks(store: PersistencePort, principal: Principal): 
   return tasks.sort((a, b) => b.unlock - a.unlock);
 }
 
-export function getSupplierPortalView(store: PersistencePort, principal: PortalPrincipal) {
-  const state = store.loadEngine(principal.organisationId);
+export async function getSupplierPortalView(store: PersistencePort, principal: PortalPrincipal) {
+  const state = await store.loadEngine(principal.organisationId);
   const cases = state.cases.filter((c) => principal.allowedCaseIds.includes(c.id));
   return {
     requesterName: state.tenant.name,
@@ -295,42 +299,105 @@ export function getSupplierPortalView(store: PersistencePort, principal: PortalP
   };
 }
 
-export function searchTenant(store: PersistencePort, principal: Principal, query: string) {
+export async function searchTenant(store: PersistencePort, principal: Principal, query: string) {
   const q = query.trim().toLowerCase();
-  const state = loadTenant(store, principal);
+  const state = await loadTenant(store, principal);
   if (!q) return { actors: [], subjects: [], evidence: [] };
   const actors = state.actors
-    .filter((a) => !a.confidential && !isConfidentialActor(state, a.id))
+    .filter((a) => !isConfidentialActor(state, a.id))
     .filter((a) => a.name.toLowerCase().includes(q) || a.legalName.toLowerCase().includes(q))
-    .filter((a) => a.id !== "mill-north" && a.id !== "mill-private")
     .map((a) => ({ id: a.id, name: a.name, kind: a.kind }));
   const subjects = state.subjects
     .filter((s) => s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q))
     .map((s) => ({ id: s.id, name: s.name, kind: s.kind }));
   const evidence = hasCapability(principal, "evidence:read")
     ? state.evidence
-        .filter((e) => e.filename.toLowerCase().includes(q) && e.visibility !== "private")
-        .map((e) => ({ id: e.id, filename: e.filename }))
+        .filter((e) => {
+          const decision = evaluateEvidenceDisclosure({
+            state,
+            evidence: e,
+            capabilities: principal.capabilities,
+            organisationId: principal.organisationId,
+          });
+          return decision.canRevealFilename && e.filename.toLowerCase().includes(q);
+        })
+        .map((e) => ({
+          opaqueRef: opaqueEvidenceRef(principal.organisationId, e.id),
+          filename: e.filename,
+        }))
     : [];
   return { actors, subjects, evidence };
 }
 
-export function getEvidenceAccess(store: PersistencePort, principal: Principal, evidenceId: string) {
-  const state = loadTenant(store, principal);
-  const evidence = state.evidence.find((e) => e.id === evidenceId);
-  if (!evidence) throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
-  if (evidence.visibility === "private" && !hasCapability(principal, "evidence:read_private")) {
+export async function getEvidenceAccess(
+  store: PersistencePort,
+  principal: Principal,
+  reference: string,
+  storage: EvidenceStorage = getMemoryEvidenceStorage()
+) {
+  const state = await loadTenant(store, principal);
+  const byOpaque = resolveEvidenceIdFromOpaqueRef(principal.organisationId, reference);
+  const evidence = state.evidence.find((item) => item.id === (byOpaque ?? reference));
+  if (!evidence) {
+    metricInc(METRICS.evidenceAccessDenied);
     throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
   }
-  store.appendAudit({
-    id: store.nextId("aud"),
+  const decision = evaluateEvidenceDisclosure({
+    state,
+    evidence,
+    capabilities: principal.capabilities,
+    organisationId: principal.organisationId,
+  });
+  if (decision.level === "NONE" || decision.level === "ATTESTATION_ONLY" || decision.level === "EXISTENCE_ONLY") {
+    metricInc(METRICS.evidenceAccessDenied);
+    logOperational("evidence.access_denied", { organisationId: principal.organisationId });
+    throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
+  }
+
+  const projection = projectEvidenceForState(state, evidence, principal.capabilities);
+  let signedUrl: string | undefined;
+  if (hasEvidenceByteAccess(principal, decision)) {
+    const object = await store.getEvidence(evidence.id);
+    const key = object?.storageKey ?? `evidence/${principal.organisationId}/${evidence.id}`;
+    signedUrl = await storage.createSignedRead({ key, ttlSeconds: 60 });
+  }
+
+  await store.appendAudit({
+    id: await Promise.resolve(store.nextId("aud")),
     organisationId: principal.organisationId,
     principalId: principal.userId,
-    action: "EVIDENCE_VIEWED_PRIVATE",
-    resource: evidenceId,
-    result: "ok",
-    detail: "Authorized evidence metadata read.",
+    action: signedUrl ? "EVIDENCE_SIGNED_URL" : "EVIDENCE_VIEWED_PRIVATE",
+    resourceType: "Evidence",
+    result: "success",
+    publicContext: { opaqueRef: opaqueEvidenceRef(principal.organisationId, evidence.id) },
     createdAt: new Date().toISOString(),
+    policyVersion: "p01-v1",
   });
-  return projectEvidence(evidence, hasCapability(principal, "evidence:read_private"));
+
+  if (!projection) {
+    metricInc(METRICS.evidenceAccessDenied);
+    throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
+  }
+
+  return {
+    ...projection,
+    signedUrl,
+  };
+}
+
+export async function getTenantAudit(store: PersistencePort, principal: Principal) {
+  const state = await loadTenant(store, principal);
+  const domain = state.events.map((event) => projectDomainEvent(state, event, "tenant"));
+  const structured = (await store.listAudit(principal.organisationId)).map((event) => projectStructuredAudit(event, "tenant"));
+  return [...domain, ...structured].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+}
+
+export async function getInternalAudit(store: PersistencePort, principal: Principal) {
+  if (!hasCapability(principal, "audit:read_internal")) {
+    throw new SourceError("FORBIDDEN", "You cannot perform this action.", 403);
+  }
+  const state = await loadTenant(store, principal);
+  const domain = state.events.map((event) => projectDomainEvent(state, event, "internal"));
+  const structured = (await store.listAudit(principal.organisationId)).map((event) => projectStructuredAudit(event, "internal"));
+  return [...domain, ...structured];
 }

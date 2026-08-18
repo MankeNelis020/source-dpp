@@ -33,8 +33,8 @@ export class MemoryWorkflowScheduler {
   }
 }
 
-export function autonomousResolutionRate(store: PersistencePort, organisationId: string) {
-  const state = store.loadEngine(organisationId);
+export async function autonomousResolutionRate(store: PersistencePort, organisationId: string) {
+  const state = await store.loadEngine(organisationId);
   const resolved = state.requirements.filter((r) => r.resolvedAt);
   if (!resolved.length) return 0;
   const withoutHuman = resolved.filter((r) => {
@@ -44,8 +44,8 @@ export function autonomousResolutionRate(store: PersistencePort, organisationId:
   return withoutHuman.length / resolved.length;
 }
 
-export function supplierContactAvoidanceRate(store: PersistencePort, organisationId: string) {
-  const state = store.loadEngine(organisationId);
+export async function supplierContactAvoidanceRate(store: PersistencePort, organisationId: string) {
+  const state = await store.loadEngine(organisationId);
   const missing = state.requirements.length;
   if (!missing) return 0;
   const withoutOutreach = state.requirements.filter((r) => {

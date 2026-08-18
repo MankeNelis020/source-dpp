@@ -1,28 +1,98 @@
 import { applyCommand, caseReadiness } from "@/domain/source/engine";
 import type { Command, EngineState } from "@/domain/source/types";
 import type { PersistencePort } from "@/infrastructure/database/ports";
-import { SlidingWindowLimiter } from "@/infrastructure/crypto/tokens";
+import type { RateLimiter } from "@/infrastructure/rate-limit/port";
+import { portalRateLimitKeys } from "@/infrastructure/rate-limit/port";
+import { getMemoryRateLimiter } from "@/infrastructure/rate-limit/memory";
+import {
+  reminderDayFromCount,
+  semanticReminderKey,
+  semanticRequestKey,
+  semanticSecondaryContactKey,
+  type OutboxRecord,
+} from "@/infrastructure/outbox/types";
+import { METRICS, metricInc, logOperational } from "@/infrastructure/observability/metrics";
 import { authorizePortalCommand, authorizeUserCommand } from "../authorization";
 import { propagateReadyClaim } from "@/domain/source/propagation";
+import { structuredCommandAudit } from "../audit";
 import type { AnyPrincipal, CommandEnvelope, CommandOutcome, Principal } from "../types";
 import { SourceError } from "../types";
-
-const portalLimiter = new SlidingWindowLimiter(60);
 
 function caseIdOf(command: Command): string | undefined {
   if ("caseId" in command) return command.caseId;
   return undefined;
 }
 
-function sideEffectsFrom(events: { type: string }[], caseId?: string) {
-  return events
-    .filter((e) => e.type === "request.sent" || e.type === "AUTO_REMINDER_SENT")
-    .map((e) => ({ type: "email.queued", key: `${caseId ?? "unknown"}:${e.type}` }));
+function outboxForEvents(args: {
+  store: PersistencePort;
+  organisationId: string;
+  state: EngineState;
+  events: { type: string }[];
+  caseId?: string;
+  now: Date;
+}): OutboxRecord[] {
+  const { store, organisationId, state, events, caseId, now } = args;
+  if (!caseId) return [];
+  const request = state.requests.find((item) => item.caseId === caseId);
+  const rows: OutboxRecord[] = [];
+  for (const event of events) {
+    let semanticKey: string | undefined;
+    let eventType = "email.queued";
+    if (event.type === "request.sent") semanticKey = semanticRequestKey(caseId);
+    if (event.type === "AUTO_REMINDER_SENT") {
+      semanticKey = semanticReminderKey(caseId, reminderDayFromCount(request?.reminderCount ?? 1));
+    }
+    if (event.type === "case.escalated" && request?.executedEscalationActions?.includes("secondary_contact")) {
+      semanticKey = semanticSecondaryContactKey(caseId);
+      eventType = "email.queued";
+    }
+    if (!semanticKey) continue;
+    rows.push({
+      id: store.nextId("obx"),
+      organisationId,
+      eventType,
+      aggregateType: "ResolutionCase",
+      aggregateId: caseId,
+      semanticKey,
+      payload: { caseId, kind: event.type },
+      status: "PENDING",
+      availableAt: now.toISOString(),
+      attemptCount: 0,
+      createdAt: now.toISOString(),
+    });
+  }
+  return rows;
 }
 
-export function resolveUserPrincipal(store: PersistencePort, userId: string, organisationId: string): Principal {
-  const user = store.getUserById(userId);
-  const membership = store.getMembership(userId, organisationId);
+async function consumePortalLimits(args: {
+  rateLimiter: RateLimiter;
+  principal: Extract<AnyPrincipal, { kind: "supplier_portal" }>;
+  commandType: string;
+  clientIp?: string;
+  tokenFingerprint?: string;
+}) {
+  const specs = portalRateLimitKeys({
+    tokenFingerprint: args.tokenFingerprint,
+    ip: args.clientIp,
+    grantId: args.principal.grantId,
+    commandType: args.commandType,
+  });
+  if (!specs.length) {
+    specs.push({ key: `portal:grant:${args.principal.grantId}`, limit: 60, windowSeconds: 60 });
+  }
+  for (const spec of specs) {
+    const result = await args.rateLimiter.consume(spec);
+    if (!result.allowed) {
+      metricInc(METRICS.portalRateLimited);
+      logOperational("portal.rate_limited", { grantId: args.principal.grantId, commandType: args.commandType });
+      throw new SourceError("RATE_LIMITED", "Too many portal attempts.", 429);
+    }
+  }
+}
+
+export async function resolveUserPrincipal(store: PersistencePort, userId: string, organisationId: string): Promise<Principal> {
+  const user = await store.getUserById(userId);
+  const membership = await store.getMembership(userId, organisationId);
   if (!user || !membership) throw new SourceError("UNAUTHENTICATED", "Sign in required.", 401);
   return {
     kind: "user",
@@ -35,38 +105,69 @@ export function resolveUserPrincipal(store: PersistencePort, userId: string, org
   };
 }
 
-export function dispatchCommand(args: {
+export async function dispatchCommand(args: {
   store: PersistencePort;
   principal: AnyPrincipal;
   envelope: CommandEnvelope;
   now?: Date;
-}): CommandOutcome {
+  rateLimiter?: RateLimiter;
+  clientIp?: string;
+  tokenFingerprint?: string;
+}): Promise<CommandOutcome> {
   const now = args.now ?? new Date();
   const { store, principal, envelope } = args;
+  const rateLimiter = args.rateLimiter ?? getMemoryRateLimiter();
 
-  if (principal.kind === "user") {
-    if (envelope.organisationId !== principal.organisationId) {
-      throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
+  try {
+    if (principal.kind === "user") {
+      if (envelope.organisationId !== principal.organisationId) {
+        throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
+      }
+      authorizeUserCommand(principal, envelope.command);
+    } else {
+      await consumePortalLimits({
+        rateLimiter,
+        principal,
+        commandType: envelope.command.type,
+        clientIp: args.clientIp,
+        tokenFingerprint: args.tokenFingerprint,
+      });
+      authorizePortalCommand(principal, envelope.command);
     }
-    authorizeUserCommand(principal, envelope.command);
-  } else {
-    if (!portalLimiter.allow(principal.grantId)) {
-      throw new SourceError("RATE_LIMITED", "Too many portal attempts.", 429);
+  } catch (error) {
+    if (error instanceof SourceError && (error.code === "FORBIDDEN" || error.code === "RESOURCE_UNAVAILABLE")) {
+      metricInc(METRICS.authzDenied);
     }
-    authorizePortalCommand(principal, envelope.command);
+    throw error;
   }
 
+  try {
+  return await store.transaction(async (tx) => executeCommand({ tx, principal, envelope, now }));
+  } catch (error) {
+    if (error instanceof SourceError && error.code === "CASE_CHANGED") metricInc(METRICS.commandsCaseChanged);
+    throw error;
+  }
+}
+
+async function executeCommand(args: {
+  tx: PersistencePort;
+  principal: AnyPrincipal;
+  envelope: CommandEnvelope;
+  now: Date;
+}): Promise<CommandOutcome> {
+  const { tx, principal, envelope, now } = args;
   const organisationId = principal.organisationId;
-  const existing = store.findProcessedCommand(organisationId, envelope.idempotencyKey);
+  const existing = await tx.findProcessedCommand(organisationId, envelope.idempotencyKey);
   if (existing) {
+    metricInc(METRICS.commandsIdempotentReplay);
     if (existing.result.status === "error") return existing.result;
     return { ...existing.result, status: "ALREADY_PROCESSED" };
   }
 
-  const state = store.loadEngine(organisationId);
+  const state = await tx.loadEngine(organisationId);
   const caseId = caseIdOf(envelope.command);
   if (caseId) {
-    const resolution = state.cases.find((c) => c.id === caseId);
+    const resolution = state.cases.find((item) => item.id === caseId);
     if (!resolution) throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
     if (envelope.expectedVersion !== undefined && resolution.version !== envelope.expectedVersion) {
       throw new SourceError("CASE_CHANGED", "This case changed while you were working. Refresh to continue.", 409);
@@ -75,21 +176,31 @@ export function dispatchCommand(args: {
 
   const result = applyCommand(state, envelope.command, now);
   if (result.caseId) {
-    const claim = result.state.claims.find((c) => c.caseId === result.caseId && c.ready);
+    const claim = result.state.claims.find((item) => item.caseId === result.caseId && item.ready);
     if (claim) propagateReadyClaim(result.state, claim.id, now);
   }
 
-  store.saveEngine(organisationId, result.state);
+  await tx.saveEngine(organisationId, result.state);
+
+  const outbox = outboxForEvents({
+    store: tx,
+    organisationId,
+    state: result.state,
+    events: result.events,
+    caseId: result.caseId,
+    now,
+  });
+  const sideEffects = outbox.map((row) => ({ type: row.eventType, key: row.semanticKey }));
 
   const outcome: CommandOutcome = {
     status: "ok",
     caseId: result.caseId,
-    version: result.caseId ? result.state.cases.find((c) => c.id === result.caseId)?.version : undefined,
-    events: result.events.map((e) => ({ type: e.type, detail: e.detail })),
-    sideEffects: sideEffectsFrom(result.events, result.caseId),
+    version: result.caseId ? result.state.cases.find((item) => item.id === result.caseId)?.version : undefined,
+    events: result.events.map((event) => ({ type: event.type, detail: event.detail })),
+    sideEffects,
   };
 
-  store.saveProcessedCommand({
+  await tx.saveProcessedCommand({
     id: envelope.commandId,
     idempotencyKey: envelope.idempotencyKey,
     organisationId,
@@ -99,26 +210,35 @@ export function dispatchCommand(args: {
     processedAt: now.toISOString(),
   });
 
-  store.appendAudit({
-    id: store.nextId("aud"),
-    organisationId,
-    principalId: envelope.principalId,
-    action: envelope.command.type,
-    resource: result.caseId,
-    result: "ok",
-    commandId: envelope.commandId,
-    detail: outcome.events.map((e) => e.detail).join(" ") || envelope.command.type,
-    createdAt: now.toISOString(),
-    policyVersion: "p0-v1",
-  });
+  await tx.appendAudit(
+    structuredCommandAudit({
+      id: await Promise.resolve(tx.nextId("aud")),
+      organisationId,
+      principalId: envelope.principalId,
+      action: envelope.command.type,
+      caseId: result.caseId,
+      commandId: envelope.commandId,
+      result: "success",
+      eventTypes: outcome.events.map((event) => event.type),
+      createdAt: now.toISOString(),
+    })
+  );
 
+  for (const row of outbox) await tx.insertOutbox(row);
+  metricInc(METRICS.commandsProcessed);
+  logOperational("command.processed", {
+    organisationId,
+    commandType: envelope.command.type,
+    caseId: result.caseId,
+    outbox: outbox.length,
+  });
   return outcome;
 }
 
 export function assertReadinessInvariant(state: EngineState) {
   for (const claim of state.claims) {
     if (!claim.caseId) continue;
-    const resolution = state.cases.find((c) => c.id === claim.caseId);
+    const resolution = state.cases.find((item) => item.id === claim.caseId);
     if (!resolution) continue;
     const evaluated = caseReadiness(state, resolution.id).ready;
     if (claim.ready !== evaluated) {
