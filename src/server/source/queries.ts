@@ -336,11 +336,7 @@ export async function getEvidenceAccess(
   storage: EvidenceStorage = getMemoryEvidenceStorage()
 ) {
   const state = await loadTenant(store, principal);
-  const byOpaque = resolveEvidenceIdFromOpaqueRef(
-    principal.organisationId,
-    reference,
-    state.evidence.map((item) => item.id)
-  );
+  const byOpaque = resolveEvidenceIdFromOpaqueRef(principal.organisationId, reference);
   const evidence = state.evidence.find((item) => item.id === (byOpaque ?? reference));
   if (!evidence) {
     metricInc(METRICS.evidenceAccessDenied);

@@ -119,6 +119,12 @@ export class PostgresPersistence implements PersistencePort {
     return rows as Membership[];
   }
 
+  /**
+   * One JSONB aggregate per organisation. Inside a command transaction this row is
+   * locked FOR UPDATE. That is the intended pilot design: simple and serializable.
+   * Scale trigger: decompose only after profiling shows tenant-level lock contention
+   * between independent commands. Do not normalize this snapshot preemptively.
+   */
   async loadEngine(organisationId: string) {
     return this.withTenant(organisationId, async (client) => {
       const lock = this.client ? " FOR UPDATE" : "";
@@ -134,6 +140,12 @@ export class PostgresPersistence implements PersistencePort {
     });
   }
 
+  /**
+   * Pilot: rewrite the whole shareable_trust_objects directory for the organisation.
+   * Correct and cheap at pilot size. Scale trigger: at ~100k claims this DELETE+INSERT
+   * becomes expensive and concurrency-sensitive — then switch to incremental /
+   * event-driven upserts per claim. Do not rebuild that path before it is needed.
+   */
   async saveEngine(organisationId: string, state: EngineState) {
     await this.withTenant(organisationId, async (client) => {
       await client.query(

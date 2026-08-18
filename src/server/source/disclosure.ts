@@ -1,5 +1,5 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
-import type { Actor, EngineState, EvidenceRecord } from "@/domain/source/types";
+import { createCipheriv, createDecipheriv, createHash, createHmac } from "node:crypto";
+import type { Actor, EngineState, EvidenceRecord, TrustLevel } from "@/domain/source/types";
 import type { Capability, Principal } from "./types";
 
 export function isConfidentialActor(state: EngineState, actorId: string | undefined): boolean {
@@ -45,27 +45,71 @@ function opaqueSecret(): string {
   return "source-demo-opaque-ref-not-for-production";
 }
 
-export function opaqueEvidenceRef(organisationId: string, evidenceId: string): string {
-  const mac = createHmac("sha256", opaqueSecret())
-    .update(`evr:${organisationId}:${evidenceId}`)
-    .digest("base64url")
-    .slice(0, 27);
-  return `evr_${mac}`;
+function opaqueKey(): Buffer {
+  return createHash("sha256").update(`source-opaque-v1:${opaqueSecret()}`).digest();
 }
 
-export function resolveEvidenceIdFromOpaqueRef(
-  organisationId: string,
-  ref: string,
-  evidenceIds: string[]
-): string | undefined {
-  if (!ref.startsWith("evr_")) return undefined;
-  for (const id of evidenceIds) {
-    const expected = opaqueEvidenceRef(organisationId, id);
-    const a = Buffer.from(expected);
-    const b = Buffer.from(ref);
-    if (a.length === b.length && timingSafeEqual(a, b)) return id;
+/**
+ * Tenant-scoped opaque evidence handle. AES-256-GCM with organisationId as AAD:
+ * decode is O(1) and does not scan the tenant evidence list.
+ * The canonical evidence id is not readable from the token.
+ * IV is derived from (org, evidenceId) so the same object keeps a stable ref.
+ */
+export function opaqueEvidenceRef(organisationId: string, evidenceId: string): string {
+  const key = opaqueKey();
+  const iv = createHmac("sha256", key).update(`iv:${organisationId}:${evidenceId}`).digest().subarray(0, 12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from(organisationId, "utf8"));
+  const ciphertext = Buffer.concat([cipher.update(evidenceId, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `evr1_${Buffer.concat([iv, tag, ciphertext]).toString("base64url")}`;
+}
+
+export function resolveEvidenceIdFromOpaqueRef(organisationId: string, ref: string): string | undefined {
+  if (!ref.startsWith("evr1_")) return undefined;
+  try {
+    const raw = Buffer.from(ref.slice("evr1_".length), "base64url");
+    if (raw.length < 12 + 16 + 1) return undefined;
+    const iv = raw.subarray(0, 12);
+    const tag = raw.subarray(12, 28);
+    const ciphertext = raw.subarray(28);
+    const decipher = createDecipheriv("aes-256-gcm", opaqueKey(), iv);
+    decipher.setAAD(Buffer.from(organisationId, "utf8"));
+    decipher.setAuthTag(tag);
+    const id = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+    return id.length > 0 ? id : undefined;
+  } catch {
+    return undefined;
   }
-  return undefined;
+}
+
+const TRUST_RANK: Record<TrustLevel, number> = {
+  DECLARED: 1,
+  EVIDENCED: 2,
+  VERIFIED: 3,
+  TRACEABLE: 4,
+};
+
+export type AttestationStatus = "ON_FILE" | "EVIDENCED" | "VERIFIED" | "EXPIRED";
+
+/**
+ * Attestation status follows engine trust, not mere existence.
+ * Not-expired bytes are ON_FILE until a linked claim is EVIDENCED or VERIFIED/TRACEABLE.
+ */
+export function attestationStatus(args: { expired: boolean; trustLevel?: TrustLevel }): AttestationStatus {
+  if (args.expired) return "EXPIRED";
+  if (!args.trustLevel || args.trustLevel === "DECLARED") return "ON_FILE";
+  if (args.trustLevel === "EVIDENCED") return "EVIDENCED";
+  return "VERIFIED";
+}
+
+export function highestTrustForEvidence(state: EngineState, evidenceId: string): TrustLevel | undefined {
+  let best: TrustLevel | undefined;
+  for (const claim of state.claims) {
+    if (claim.evidenceId !== evidenceId) continue;
+    if (!best || TRUST_RANK[claim.trustLevel] > TRUST_RANK[best]) best = claim.trustLevel;
+  }
+  return best;
 }
 
 export function evaluateActorDisclosure(state: EngineState, actorId: string | undefined): DisclosureDecision {
@@ -178,14 +222,15 @@ export type EvidenceProjection =
   | {
       type: "EVIDENCE_ATTESTATION";
       evidenceVisible: false;
-      status: "VERIFIED" | "EXPIRED" | "ON_FILE";
+      status: AttestationStatus;
       validUntil?: string;
     };
 
 export function projectEvidenceRecord(
   organisationId: string,
   evidence: EvidenceRecord,
-  decision: DisclosureDecision
+  decision: DisclosureDecision,
+  trustLevel?: TrustLevel
 ): EvidenceProjection | undefined {
   if (decision.level === "NONE") return undefined;
 
@@ -197,7 +242,7 @@ export function projectEvidenceRecord(
     return {
       type: "EVIDENCE_ATTESTATION",
       evidenceVisible: false,
-      status: evidence.expired ? "EXPIRED" : "VERIFIED",
+      status: attestationStatus({ expired: evidence.expired, trustLevel }),
       validUntil: decision.canRevealValidity ? evidence.validUntil : undefined,
     };
   }

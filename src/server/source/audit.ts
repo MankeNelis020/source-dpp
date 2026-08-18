@@ -184,5 +184,5 @@ function portalPublicContext(context: Record<string, unknown>): Record<string, u
 }
 
 export function opaqueActorRef(organisationId: string, actorId: string): string {
-  return opaqueEvidenceRef(organisationId, `actor:${actorId}`).replace(/^evr_/, "act_");
+  return opaqueEvidenceRef(organisationId, `actor:${actorId}`).replace(/^evr1_/, "act1_");
 }

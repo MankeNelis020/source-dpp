@@ -3,7 +3,11 @@ import { MemoryPersistence } from "@/infrastructure/database/memory";
 import { dispatchCommand, resolveUserPrincipal } from "@/server/source/commands/dispatch";
 import { getCaseDetail, getEvidenceAccess, getInternalAudit, getTenantAudit, searchTenant } from "@/server/source/queries";
 import { leakScan } from "@/server/source/confidentiality";
-import { opaqueEvidenceRef } from "@/server/source/disclosure";
+import {
+  attestationStatus,
+  opaqueEvidenceRef,
+  resolveEvidenceIdFromOpaqueRef,
+} from "@/server/source/disclosure";
 import { MemoryRateLimiter } from "@/infrastructure/rate-limit/memory";
 import { MemoryEmailPort } from "@/infrastructure/database/ports";
 import { processOutboxBatch } from "@/infrastructure/outbox/processor";
@@ -30,13 +34,14 @@ describe("structured disclosure", () => {
     const privateCase = await getCaseDetail(store, reviewer, "SRC-184831");
     expect(privateCase.evidence?.type).toBe("EVIDENCE_ATTESTATION");
     expect(privateCase.evidence?.evidenceVisible).toBe(false);
+    expect(privateCase.evidence?.status).toBe("EVIDENCED");
     expect(JSON.stringify(privateCase)).not.toContain("ev-44102");
     expect(JSON.stringify(privateCase)).not.toContain("packaging-lca-2026.pdf");
 
     const visible = await getCaseDetail(store, owner, "SRC-184821");
     expect(visible.evidence?.type).toBe("EVIDENCE_RECORD");
     if (visible.evidence?.type === "EVIDENCE_RECORD") {
-      expect(visible.evidence.opaqueRef.startsWith("evr_")).toBe(true);
+      expect(visible.evidence.opaqueRef.startsWith("evr1_")).toBe(true);
       expect(JSON.stringify(visible.evidence)).not.toContain("ev-92831");
     }
   });
@@ -56,6 +61,25 @@ describe("structured disclosure", () => {
     expect(allowed.type).toBe("EVIDENCE_RECORD");
     expect(allowed.signedUrl).toBeTruthy();
     expect(JSON.stringify(allowed)).not.toContain("storageKey");
+  });
+
+  it("decodes opaque evidence refs in O(1) without scanning tenant evidence ids", () => {
+    const evidenceId = "ev-92831";
+    const ref = opaqueEvidenceRef("acme", evidenceId);
+    expect(ref.startsWith("evr1_")).toBe(true);
+    expect(ref).not.toContain(evidenceId);
+    expect(resolveEvidenceIdFromOpaqueRef("acme", ref)).toBe(evidenceId);
+    expect(resolveEvidenceIdFromOpaqueRef("nordic", ref)).toBeUndefined();
+    expect(resolveEvidenceIdFromOpaqueRef("acme", "evr_legacyhmac")).toBeUndefined();
+  });
+
+  it("maps attestation status from engine trust, not mere non-expiry", () => {
+    expect(attestationStatus({ expired: true, trustLevel: "VERIFIED" })).toBe("EXPIRED");
+    expect(attestationStatus({ expired: false })).toBe("ON_FILE");
+    expect(attestationStatus({ expired: false, trustLevel: "DECLARED" })).toBe("ON_FILE");
+    expect(attestationStatus({ expired: false, trustLevel: "EVIDENCED" })).toBe("EVIDENCED");
+    expect(attestationStatus({ expired: false, trustLevel: "VERIFIED" })).toBe("VERIFIED");
+    expect(attestationStatus({ expired: false, trustLevel: "TRACEABLE" })).toBe("VERIFIED");
   });
 });
 

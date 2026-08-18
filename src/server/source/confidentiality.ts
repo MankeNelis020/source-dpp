@@ -3,6 +3,7 @@ import type { AuditEvent, EngineState, EvidenceRecord, ResolutionCase } from "@/
 import {
   evaluateActorDisclosure,
   evaluateEvidenceDisclosure,
+  highestTrustForEvidence,
   isConfidentialActor,
   projectEvidenceRecord,
   type EvidenceProjection,
@@ -88,7 +89,12 @@ export function projectEvidenceForState(
     capabilities,
     organisationId: state.tenant.id,
   });
-  return projectEvidenceRecord(state.tenant.id, evidence, decision);
+  return projectEvidenceRecord(
+    state.tenant.id,
+    evidence,
+    decision,
+    highestTrustForEvidence(state, evidence.id)
+  );
 }
 
 /** @deprecated Primary enforcement is structured disclosure. Kept as a defensive fallback. */
