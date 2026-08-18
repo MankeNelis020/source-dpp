@@ -17,49 +17,49 @@ import { propagateReadyClaim } from "@/domain/source/propagation";
 import { structuredCommandAudit } from "../audit";
 import type { AnyPrincipal, CommandEnvelope, CommandOutcome, Principal } from "../types";
 import { SourceError } from "../types";
+import { queueSupplierOutreach } from "@/server/source/outreach";
 
 function caseIdOf(command: Command): string | undefined {
   if ("caseId" in command) return command.caseId;
   return undefined;
 }
 
-function outboxForEvents(args: {
+async function outboxForEvents(args: {
   store: PersistencePort;
   organisationId: string;
+  organisationName: string;
   state: EngineState;
   events: { type: string }[];
   caseId?: string;
   now: Date;
-}): OutboxRecord[] {
-  const { store, organisationId, state, events, caseId, now } = args;
+}): Promise<OutboxRecord[]> {
+  const { store, organisationId, organisationName, state, events, caseId, now } = args;
   if (!caseId) return [];
   const request = state.requests.find((item) => item.caseId === caseId);
   const rows: OutboxRecord[] = [];
   for (const event of events) {
     let semanticKey: string | undefined;
-    let eventType = "email.queued";
     if (event.type === "request.sent") semanticKey = semanticRequestKey(caseId);
     if (event.type === "AUTO_REMINDER_SENT") {
       semanticKey = semanticReminderKey(caseId, reminderDayFromCount(request?.reminderCount ?? 1));
     }
     if (event.type === "case.escalated" && request?.executedEscalationActions?.includes("secondary_contact")) {
       semanticKey = semanticSecondaryContactKey(caseId);
-      eventType = "email.queued";
     }
     if (!semanticKey) continue;
-    rows.push({
-      id: store.nextId("obx"),
+    const supplierActorId = request?.supplierId ?? state.cases.find((c) => c.id === caseId)?.currentActorId;
+    if (!supplierActorId) continue;
+    const row = await queueSupplierOutreach({
+      store,
       organisationId,
-      eventType,
-      aggregateType: "ResolutionCase",
-      aggregateId: caseId,
+      organisationName,
+      state,
+      supplierActorId,
+      caseIds: [caseId],
       semanticKey,
-      payload: { caseId, kind: event.type },
-      status: "PENDING",
-      availableAt: now.toISOString(),
-      attemptCount: 0,
-      createdAt: now.toISOString(),
+      now,
     });
+    if (row) rows.push(row);
   }
   return rows;
 }
@@ -182,9 +182,10 @@ async function executeCommand(args: {
 
   await tx.saveEngine(organisationId, result.state);
 
-  const outbox = outboxForEvents({
+  const outbox = await outboxForEvents({
     store: tx,
     organisationId,
+    organisationName: result.state.tenant.name,
     state: result.state,
     events: result.events,
     caseId: result.caseId,

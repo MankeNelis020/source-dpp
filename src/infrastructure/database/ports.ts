@@ -119,6 +119,7 @@ export interface EmailPort {
     to: string;
     subject: string;
     text: string;
+    html?: string;
     idempotencyKey: string;
   }): Promise<"SENT" | "ALREADY_PROCESSED">;
 }
@@ -129,18 +130,25 @@ export interface ObjectStoragePort {
 }
 
 export class MemoryEmailPort implements EmailPort {
-  sent: { to: string; subject: string; idempotencyKey: string }[] = [];
+  sent: { to: string; subject: string; text: string; html?: string; idempotencyKey: string }[] = [];
   failWith?: Error;
 
   async send(input: {
     to: string;
     subject: string;
     text: string;
+    html?: string;
     idempotencyKey: string;
   }): Promise<"SENT" | "ALREADY_PROCESSED"> {
     if (this.failWith) throw this.failWith;
     if (this.sent.some((row) => row.idempotencyKey === input.idempotencyKey)) return "ALREADY_PROCESSED";
-    this.sent.push({ to: input.to, subject: input.subject, idempotencyKey: input.idempotencyKey });
+    this.sent.push({
+      to: input.to,
+      subject: input.subject,
+      text: input.text,
+      html: input.html,
+      idempotencyKey: input.idempotencyKey,
+    });
     return "SENT";
   }
 }

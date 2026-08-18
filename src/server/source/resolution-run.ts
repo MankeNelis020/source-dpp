@@ -6,6 +6,7 @@ import { findReusableClaimsForRequirement } from "@/server/source/network";
 import type { Principal } from "@/server/source/types";
 import { SourceError } from "@/server/source/types";
 import { hasCapability } from "@/server/source/authorization";
+import { queueSupplierOutreach } from "@/server/source/outreach";
 
 const ACTIVE_REQUEST_STATES = new Set([
   "DRAFT",
@@ -52,6 +53,7 @@ export async function executeResolutionRun(store: PersistencePort, principal: Pr
 
     const started = Date.now();
     run.executionStartedAt = run.executionStartedAt ?? now.toISOString();
+    const requestIdsBefore = new Set(state.requests.map((r) => r.id));
 
     const open = state.cases.filter(
       (c) => !["READY", "MONITORING", "UNRESOLVED", "WAITING_RESPONSE", "WAITING_UPSTREAM"].includes(c.state)
@@ -136,10 +138,35 @@ export async function executeResolutionRun(store: PersistencePort, principal: Pr
       return { id: `grp-${index + 1}`, supplierActorId, propertyId, caseIds, createdAt: now.toISOString() };
     });
 
+    const newBySupplier = new Map<string, string[]>();
+    for (const request of state.requests) {
+      if (requestIdsBefore.has(request.id)) continue;
+      const list = newBySupplier.get(request.supplierId) ?? [];
+      list.push(request.caseId);
+      newBySupplier.set(request.supplierId, list);
+    }
+    let emailsQueued = 0;
+    for (const [supplierActorId, caseIds] of newBySupplier) {
+      const row = await queueSupplierOutreach({
+        store: tx,
+        organisationId: principal.organisationId,
+        organisationName: state.tenant.name,
+        state,
+        supplierActorId,
+        caseIds,
+        semanticKey: `${run.id}:SUPPLIER:${supplierActorId}:v1`,
+        now,
+      });
+      if (row) {
+        await tx.insertOutbox(row);
+        emailsQueued += 1;
+      }
+    }
+
     run.cost = {
       extractionCalls: 0,
       documentsProcessed: state.evidence.length,
-      emailsQueued: state.requests.filter((r) => Date.parse(r.sentAt ?? run.executionStartedAt ?? run.startedAt) >= Date.parse(run.executionStartedAt ?? run.startedAt)).length,
+      emailsQueued,
       backgroundJobs: 1,
       storageBytes: Buffer.byteLength(JSON.stringify(state), "utf8"),
       humanReviews: state.tasks.filter((t) => t.status === "open").length,

@@ -22,7 +22,7 @@ export async function resolvePortalPrincipal(store: PersistencePort, token: stri
   };
 }
 
-export function issuePortalGrant(
+export async function issuePortalGrant(
   store: PersistencePort,
   input: {
     token: string;
@@ -33,7 +33,7 @@ export function issuePortalGrant(
     expiresAt: string;
   }
 ) {
-  store.savePortalGrant({
+  await store.savePortalGrant({
     id: store.nextId("grant"),
     tokenHash: hashToken(input.token),
     actorId: input.actorId,
