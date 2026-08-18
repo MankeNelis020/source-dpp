@@ -2,9 +2,12 @@ import { explainException } from "./copy";
 import { wouldCreateCycle } from "./cycles";
 import { STANDARD_SUPPLIER_14D, nextPendingStep, upcomingStep } from "./escalation";
 import { resolveIdentity } from "./identity";
+import { IDENTITY_ENGINE_VERSION } from "./identity";
+import { evaluatePermission } from "./permissions";
 import { evaluateReadiness, mayAutoLinkEvidence } from "./readiness";
 import { evaluateReuse, findActiveDuplicate } from "./reuse";
 import { pickContact } from "./routing";
+import { defaultPropertiesForKind, productIdsForSubject } from "./subjects";
 import type {
   AuditEvent,
   ClaimRecord,
@@ -19,8 +22,6 @@ import type {
   ResolutionCase,
   SupplierRequest,
 } from "./types";
-
-const MANUFACTURER_ID = "acme";
 
 export function emptyState(): EngineState {
   return {
@@ -40,6 +41,11 @@ export function emptyState(): EngineState {
     events: [],
     policies: [STANDARD_SUPPLIER_14D],
     dependencies: [],
+    subjects: [],
+    subjectRelationships: [],
+    subjectIdentifiers: [],
+    tenantSubjectMappings: [],
+    identityDecisions: [],
     tenant: { id: "acme", name: "Acme Manufacturing B.V.", identityAutoLinkThreshold: 95 },
     seq: 1,
   };
@@ -119,13 +125,55 @@ export function applyCommand(state: EngineState, command: Command, now: Date): E
       if (task) task.status = "done";
       return done(next, events);
     }
+    case "ADD_SUBJECT":
+      addSubject(next, command, now, emit);
+      return done(next, events);
+    case "CORRECT_SUBJECT_RELATIONSHIP":
+      correctSubjectRelationship(next, command, now, emit);
+      return done(next, events);
+    case "REMOVE_SUBJECT_RELATIONSHIP": {
+      const rel = next.subjectRelationships.find((r) => r.id === command.relationshipId);
+      next.subjectRelationships = next.subjectRelationships.filter((r) => r.id !== command.relationshipId);
+      emit({
+        type: "subject.relationship_removed",
+        actor: command.createdBy ?? "user",
+        timestamp: iso(now),
+        detail: rel ? `Removed ${rel.childSubjectId} from ${rel.parentSubjectId}.` : "Relationship removed.",
+      });
+      return done(next, events);
+    }
+    case "MARK_SUBJECT_UNKNOWN": {
+      const subject = next.subjects.find((s) => s.id === command.subjectId);
+      if (subject) {
+        subject.name = subject.name.startsWith("Unknown") ? subject.name : `Unknown · ${subject.name}`;
+        subject.source = "USER_ADDED";
+        subject.confidence = 0;
+      }
+      emit({
+        type: "subject.marked_unknown",
+        actor: command.createdBy ?? "user",
+        timestamp: iso(now),
+        detail: `Marked ${command.subjectId} as unknown. Dependent requirements will be recalculated.`,
+      });
+      return done(next, events);
+    }
     default:
       return done(next, events);
   }
 }
 
 function done(state: EngineState, events: AuditEvent[], caseId?: string): EngineResult {
+  refreshReadinessCache(state, caseId);
   return { state, events, caseId };
+}
+
+function refreshReadinessCache(state: EngineState, caseId?: string) {
+  const claims = caseId ? state.claims.filter((c) => c.caseId === caseId) : [];
+  for (const claim of claims) {
+    const resolution = state.cases.find((c) => c.id === claim.caseId);
+    if (!resolution) continue;
+    claim.ready = caseReadiness(state, resolution.id).ready;
+  }
 }
 
 function id(state: EngineState, prefix: string): string {
@@ -205,7 +253,7 @@ function openRequirement(
       timestamp: iso(now),
       detail: `Linked to existing case ${duplicate.caseId} instead of sending a duplicate request.`,
     });
-    return { state, events: state.events.slice(-1), caseId: duplicate.caseId };
+    return done(state, state.events.slice(-1), duplicate.caseId);
   }
 
   if (!state.requirements.some((r) => r.id === requirement.id)) {
@@ -241,6 +289,7 @@ function openRequirement(
     version: 1,
     identityStatus: identity.status,
     identityConfidence: identity.candidates[0]?.confidence ?? (identity.status === "IDENTITY_MATCHED" ? 99.8 : undefined),
+    identityModelVersion: IDENTITY_ENGINE_VERSION,
     productId: requirement.productIds[0],
     supplierId: identity.selected?.id ?? command.declaredSupplierId,
     automationLevel: "L2",
@@ -276,7 +325,7 @@ function openRequirement(
       timestamp: iso(now),
       detail: "Two probable matches. Evidence will not be auto-linked.",
     });
-    return { state, events: state.events.slice(-2), caseId: resolution.id };
+    return done(state, state.events.slice(-2), resolution.id);
   }
 
   resolution.state = "SEARCHING_EXISTING_DATA";
@@ -297,7 +346,7 @@ function openRequirement(
   if (claim) claim.caseId = resolution.id;
   if (reuse === "READY" && claim) {
     markReady(state, resolution, claim, now, emit, "Existing claim reused without a new request.");
-    return { state, events: state.events.filter((e) => e.caseId === resolution.id), caseId: resolution.id };
+    return done(state, state.events.filter((e) => e.caseId === resolution.id), resolution.id);
   }
   if (reuse === "AUTHORIZATION_REQUIRED") {
     resolution.state = "AUTHORIZATION_REQUIRED";
@@ -312,7 +361,7 @@ function openRequirement(
       timestamp: iso(now),
       detail: "Reusable claim found. Authorization still required.",
     });
-    return { state, events: state.events.filter((e) => e.caseId === resolution.id), caseId: resolution.id };
+    return done(state, state.events.filter((e) => e.caseId === resolution.id), resolution.id);
   }
   if (reuse === "EXPIRED" && claim) {
     resolution.state = "RENEWAL_REQUIRED";
@@ -320,18 +369,18 @@ function openRequirement(
       nextAction: "Request replacement evidence.",
       nextActionAt: addDays(now, 7),
     });
-    return { state, events: state.events.filter((e) => e.caseId === resolution.id), caseId: resolution.id };
+    return done(state, state.events.filter((e) => e.caseId === resolution.id), resolution.id);
   }
 
   resolution.state = "ROUTING";
   if (!resolution.currentActorId) {
     resolution.state = "REVIEW_ROUTING";
     resolution.nextAction = "Review routing. Confidence is too low to send.";
-    return { state, events: state.events.filter((e) => e.caseId === resolution.id), caseId: resolution.id };
+    return done(state, state.events.filter((e) => e.caseId === resolution.id), resolution.id);
   }
 
   sendRequest(state, resolution.id, now, emit);
-  return { state, events: state.events.filter((e) => e.caseId === resolution.id || e.type === "requirement.created"), caseId: resolution.id };
+  return done(state, state.events.filter((e) => e.caseId === resolution.id || e.type === "requirement.created"), resolution.id);
 }
 
 function sendRequest(
@@ -973,8 +1022,29 @@ function submitResponse(
     evidenceRequired: requirement.requiredTrustLevel !== "DECLARED",
     scopeMatch,
     permission: permission.state,
+    permissionDecision: evaluatePermission({
+      storedState: permission.state,
+      visibility: permission.visibility,
+      permissionRequired: requirement.requiredPermissionLevel === "granted",
+      requestingOrganisationId: state.tenant.id,
+      granteeActorId: permission.granteeActorId,
+      purpose: requirement.purpose,
+      grantPurpose: permission.purpose,
+      now,
+      validFrom: permission.validFrom,
+      validUntil: permission.validUntil,
+      revokedAt: permission.revokedAt,
+    }),
     permissionRequired: requirement.requiredPermissionLevel === "granted",
     conflict: false,
+    permissionContext: {
+      visibility: permission.visibility,
+      requestingOrganisationId: state.tenant.id,
+      granteeActorId: permission.granteeActorId,
+      purpose: requirement.purpose,
+      grantPurpose: permission.purpose,
+      now,
+    },
   });
 
   if (!report.ready) {
@@ -1038,7 +1108,7 @@ function writePermission(
     id: id(state, "perm"),
     claimId: claim.id,
     evidenceId: claim.evidenceId,
-    granteeActorId: MANUFACTURER_ID,
+    granteeActorId: state.tenant.id,
     purpose: claim.purpose,
     state: command.permission,
     visibility: command.visibility ?? "value",
@@ -1121,6 +1191,7 @@ function setPermission(
       evidenceRequired: requirement.requiredTrustLevel !== "DECLARED",
       scopeMatch: true,
       permission: "GRANTED",
+      permissionDecision: "ALLOW",
       permissionRequired: true,
       conflict: state.conflicts.some((c) => c.caseId === caseId && !c.resolved),
     });
@@ -1205,6 +1276,7 @@ function expireEvidence(
       timestamp: iso(now),
       detail: "Renewal case opened according to policy.",
     });
+    refreshReadinessCache(state, resolution.id);
   }
 }
 
@@ -1249,6 +1321,18 @@ function confirmIdentity(
     command.decision === "confirm" || command.decision === "merge" ? "IDENTITY_MATCHED" : "IDENTITY_NOT_FOUND";
   if (command.actorId) resolution.currentActorId = command.actorId;
   resolution.identityConfidence = command.decision === "confirm" ? 99.9 : resolution.identityConfidence;
+  state.identityDecisions.push({
+    id: id(state, "idec"),
+    tenantId: state.tenant.id,
+    subject: "actor",
+    query: resolution.id,
+    decision: command.decision,
+    fromIds: resolution.currentActorId ? [resolution.currentActorId] : [],
+    toId: command.actorId,
+    decidedBy: "reviewer",
+    modelVersion: IDENTITY_ENGINE_VERSION,
+    createdAt: iso(now),
+  });
   emit({
     type: "identity.resolved",
     caseId: command.caseId,
@@ -1298,6 +1382,98 @@ function assignColleague(
   changeContact(state, caseId, created.id, now, emit);
 }
 
+function addSubject(
+  state: EngineState,
+  command: Extract<Command, { type: "ADD_SUBJECT" }>,
+  now: Date,
+  emit: (e: Omit<AuditEvent, "id">) => void
+) {
+  const source = command.source ?? "USER_ADDED";
+  const subjectId = id(state, "sub");
+  state.subjects.push({
+    id: subjectId,
+    kind: command.kind,
+    name: command.name,
+    createdBy: command.createdBy ?? "user",
+    createdAt: iso(now),
+    source,
+    confidence: source === "USER_ADDED" ? 100 : source === "AI_EXTRACTED" ? 70 : 90,
+    sourceReference: source === "USER_ADDED" ? "manual_entry" : undefined,
+  });
+  if (command.parentSubjectId) {
+    state.subjectRelationships.push({
+      id: id(state, "srel"),
+      parentSubjectId: command.parentSubjectId,
+      childSubjectId: subjectId,
+      quantity: command.quantity,
+      unit: command.unit,
+      source,
+      createdBy: command.createdBy ?? "user",
+      createdAt: iso(now),
+    });
+  }
+  emit({
+    type: "subject.added",
+    actor: command.createdBy ?? "user",
+    timestamp: iso(now),
+    detail: `Added ${command.kind.toLowerCase()} ${command.name} (${source}).`,
+    payload: { source, kind: command.kind },
+  });
+
+  if (command.generateRequirements === false) return;
+
+  const productIds =
+    command.productIds ??
+    (command.parentSubjectId
+      ? productIdsForSubject(command.parentSubjectId, state.subjects, state.subjectRelationships)
+      : []);
+  for (const property of defaultPropertiesForKind(command.kind)) {
+    const requirement = {
+      id: id(state, "ireq"),
+      tenantId: state.tenant.id,
+      subjectId,
+      subjectLabel: command.name,
+      productIds: productIds.length ? productIds : command.parentSubjectId ? [command.parentSubjectId] : [subjectId],
+      propertyId: property.propertyId,
+      propertyLabel: property.propertyLabel,
+      datasetId: "espr-al-2027",
+      purpose: "DPP_COMPLIANCE" as const,
+      requiredTrustLevel: "EVIDENCED" as const,
+      requiredPermissionLevel: "granted" as const,
+      requiredBy: addDays(now, 180),
+      priority: 50,
+      createdAt: iso(now),
+    };
+    openRequirement(
+      state,
+      { type: "OPEN_REQUIREMENT", requirement, declaredSupplierId: command.supplierId },
+      now,
+      emit
+    );
+  }
+}
+
+function correctSubjectRelationship(
+  state: EngineState,
+  command: Extract<Command, { type: "CORRECT_SUBJECT_RELATIONSHIP" }>,
+  now: Date,
+  emit: (e: Omit<AuditEvent, "id">) => void
+) {
+  const rel = state.subjectRelationships.find((r) => r.id === command.relationshipId);
+  if (!rel) return;
+  if (command.childSubjectId) rel.childSubjectId = command.childSubjectId;
+  if (command.quantity !== undefined) rel.quantity = command.quantity;
+  if (command.unit !== undefined) rel.unit = command.unit;
+  rel.source = "USER_ADDED";
+  rel.createdBy = command.createdBy ?? "user";
+  emit({
+    type: "subject.relationship_corrected",
+    actor: command.createdBy ?? "user",
+    timestamp: iso(now),
+    detail: `Corrected relationship ${rel.id}. Provenance is USER_ADDED.`,
+  });
+}
+
 export function caseReadiness(state: EngineState, caseId: string) {
   const resolution = caseById(state, caseId);
   const requirement = requirementOf(state, resolution);
@@ -1319,8 +1495,29 @@ export function caseReadiness(state: EngineState, caseId: string) {
     evidenceRequired: requirement.requiredTrustLevel !== "DECLARED",
     scopeMatch: !evidence || evidence.scope.id === requirement.subjectId || evidence.scope.kind === "product",
     permission: permission?.state ?? claim?.permissionState ?? "UNKNOWN",
+    permissionDecision: evaluatePermission({
+      storedState: permission?.state ?? claim?.permissionState ?? "UNKNOWN",
+      visibility: permission?.visibility,
+      permissionRequired: requirement.requiredPermissionLevel === "granted",
+      requestingOrganisationId: state.tenant.id,
+      granteeActorId: permission?.granteeActorId,
+      purpose: requirement.purpose,
+      grantPurpose: permission?.purpose,
+      now: new Date(0),
+      validFrom: permission?.validFrom,
+      validUntil: permission?.validUntil,
+      revokedAt: permission?.revokedAt,
+    }),
     permissionRequired: requirement.requiredPermissionLevel === "granted",
     conflict,
+    permissionContext: {
+      visibility: permission?.visibility,
+      requestingOrganisationId: state.tenant.id,
+      granteeActorId: permission?.granteeActorId,
+      purpose: requirement.purpose,
+      grantPurpose: permission?.purpose,
+      now: new Date(0),
+    },
   });
 }
 

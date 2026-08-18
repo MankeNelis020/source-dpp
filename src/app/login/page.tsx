@@ -34,9 +34,14 @@ function LoginForm() {
           }
           writeSession({
             email,
-            organisation: "Acme Manufacturing B.V.",
+            organisation: email.toLowerCase().includes("nordic") ? "Nordic Chairs Oy" : "Acme Manufacturing B.V.",
           });
-          router.push(safeNext);
+          void fetch("/api/auth/login", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email }),
+          }).then(() => router.push(safeNext));
         }}
       >
         <div>

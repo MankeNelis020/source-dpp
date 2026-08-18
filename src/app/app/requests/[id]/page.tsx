@@ -5,15 +5,16 @@ import { notFound, useParams } from "next/navigation";
 import { requestById } from "@/lib/source/demo-data";
 import { SourceButton, SourceLabel, StatusPill } from "@/components/source/ui";
 import { CaseStatePill, formatWhen } from "@/components/source/case-status";
-import { dispatchCommand, useEngineState } from "@/domain/source/store";
+import { useDispatchCommand, useSourceQuery } from "@/client/source/api";
 
 export default function RequestDetailPage() {
   const params = useParams<{ id: string }>();
   const request = requestById(params.id);
-  const engine = useEngineState();
+  const dispatch = useDispatchCommand();
+  const { data } = useSourceQuery<{ cases: { id: string; state: string; nextAction: string; nextActionAt?: string; ownerLabel?: string; supplierId?: string }[] }>("/api/source/cases?filter=all");
   if (!request) notFound();
   const pct = Math.round((request.complete / request.claimsRequested) * 100);
-  const cases = engine.cases.filter((c) => c.supplierId === request.supplierId || c.requestId?.includes(request.supplierId));
+  const cases = (data?.cases ?? []).filter((c) => c.supplierId === request.supplierId);
   const focus = cases.find((c) => c.state === "WAITING_RESPONSE") ?? cases[0];
 
   return (
@@ -55,10 +56,10 @@ export default function RequestDetailPage() {
             Escalation owner: {focus.ownerLabel ?? "John — Procurement"}
           </p>
           <div className="mt-5 flex flex-wrap gap-2">
-            <SourceButton onClick={() => dispatchCommand({ type: "SEND_REMINDER", caseId: focus.id })}>
+            <SourceButton onClick={() => void dispatch({ type: "SEND_REMINDER", caseId: focus.id })}>
               Send reminder now
             </SourceButton>
-            <SourceButton variant="ghost" onClick={() => dispatchCommand({ type: "ESCALATE", caseId: focus.id })}>
+            <SourceButton variant="ghost" onClick={() => void dispatch({ type: "ESCALATE", caseId: focus.id })}>
               Escalate
             </SourceButton>
             <SourceButton href={`/app/missing/${focus.id}`} variant="ghost">
@@ -86,11 +87,11 @@ export default function RequestDetailPage() {
             A request can be declined while the case continues on another route.
           </p>
           <ul className="mt-3 space-y-2">
-            {cases.map((c) => (
+          {cases.map((c) => (
               <li key={c.id}>
                 <Link href={`/app/missing/${c.id}`} className="flex items-center justify-between text-[13px] hover:underline">
                   <span>{c.id}</span>
-                  <CaseStatePill state={c.state} />
+                  <CaseStatePill state={c.state as import("@/domain/source").ResolutionCaseState} />
                 </Link>
               </li>
             ))}

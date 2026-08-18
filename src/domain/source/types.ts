@@ -63,6 +63,45 @@ export type PermissionState =
   | "EXPIRED"
   | "REVOKED";
 
+/** Evaluated permission used by readiness. Stored PermissionState is not sufficient. */
+export type PermissionDecision = "ALLOW" | "DENY" | "AUTHORIZATION_REQUIRED";
+
+export type VisibilityPolicy =
+  | "PUBLIC"
+  | "CUSTOMER_ONLY"
+  | "VALUE_ONLY"
+  | "EVIDENCE_HIDDEN"
+  | "UPSTREAM_IDENTITY_HIDDEN"
+  | "VERIFICATION_ONLY"
+  | "REQUEST_ACCESS"
+  | "PRIVATE";
+
+export type LegacyVisibility = "value" | "evidence_hidden" | "upstream_hidden" | "verification_only" | "restricted";
+
+export type SubjectKind =
+  | "PRODUCT"
+  | "PRODUCT_FAMILY"
+  | "VARIANT"
+  | "BATCH"
+  | "ITEM"
+  | "COMPONENT"
+  | "MATERIAL"
+  | "RAW_MATERIAL"
+  | "PACKAGING"
+  | "FACILITY";
+
+export type AssignmentSource =
+  | "IMPORTED"
+  | "AUTO_DETECTED"
+  | "USER_ADDED"
+  | "SUPPLIER_DECLARED"
+  | "AI_EXTRACTED"
+  | "SYSTEM_INFERRED";
+
+/** Current actor/subject matcher is a prototype. Do not present scores as calibrated probabilities. */
+export const IDENTITY_ENGINE_VERSION = "heuristic-v0" as const;
+export type IdentityEngineVersion = typeof IDENTITY_ENGINE_VERSION;
+
 export type IdentityStatus =
   | "IDENTITY_MATCHED"
   | "IDENTITY_PROBABLE"
@@ -254,6 +293,7 @@ export interface ResolutionCase {
   version: number;
   identityStatus: IdentityStatus;
   identityConfidence?: number;
+  identityModelVersion?: IdentityEngineVersion;
   requestId?: string;
   productId?: string;
   supplierId?: string;
@@ -357,9 +397,11 @@ export interface PermissionGrant {
   granteeActorId: string;
   purpose: Purpose;
   state: PermissionState;
-  visibility: "value" | "evidence_hidden" | "upstream_hidden" | "verification_only" | "restricted";
+  visibility: VisibilityPolicy | LegacyVisibility;
   createdAt: string;
   revokedAt?: string;
+  validFrom?: string;
+  validUntil?: string;
 }
 
 export interface ClaimConflict {
@@ -424,6 +466,63 @@ export interface DownstreamDependency {
   status: "active" | "flagged" | "corrected";
 }
 
+export interface CanonicalSubject {
+  id: string;
+  kind: SubjectKind;
+  name: string;
+  createdBy?: string;
+  createdAt: string;
+  source: AssignmentSource;
+  confidence?: number;
+  sourceReference?: string;
+}
+
+export interface SubjectRelationship {
+  id: string;
+  parentSubjectId: string;
+  childSubjectId: string;
+  quantity?: number;
+  unit?: string;
+  source: AssignmentSource;
+  createdBy?: string;
+  createdAt: string;
+  confidence?: number;
+}
+
+export interface SubjectIdentifier {
+  id: string;
+  canonicalSubjectId: string;
+  scheme: "GTIN" | "MPN" | "SKU" | "INTERNAL" | "SUPPLIER_PID" | "VAT" | "LEI" | "EORI";
+  value: string;
+}
+
+export interface TenantSubjectMapping {
+  id: string;
+  tenantId: string;
+  sourceSystem: string;
+  sourceRecordId: string;
+  canonicalSubjectId: string;
+  matchMethod: "deterministic" | "normalized" | "probabilistic" | "graph" | "human";
+  confidence: number;
+  decision: "auto" | "confirmed" | "rejected" | "created";
+  reviewedBy?: string;
+  modelVersion: IdentityEngineVersion;
+  createdAt: string;
+}
+
+export interface IdentityDecision {
+  id: string;
+  tenantId: string;
+  subject: "actor" | "canonical_subject";
+  query: string;
+  decision: "confirm" | "reject" | "create_new" | "merge" | "split";
+  fromIds: string[];
+  toId?: string;
+  decidedBy: string;
+  modelVersion: IdentityEngineVersion;
+  createdAt: string;
+}
+
 export interface EngineState {
   actors: Actor[];
   contacts: ContactPoint[];
@@ -441,6 +540,11 @@ export interface EngineState {
   events: AuditEvent[];
   policies: EscalationPolicy[];
   dependencies: DownstreamDependency[];
+  subjects: CanonicalSubject[];
+  subjectRelationships: SubjectRelationship[];
+  subjectIdentifiers: SubjectIdentifier[];
+  tenantSubjectMappings: TenantSubjectMapping[];
+  identityDecisions: IdentityDecision[];
   tenant: { id: string; name: string; identityAutoLinkThreshold: number };
   seq: number;
 }
@@ -494,7 +598,34 @@ export type Command =
     }
   | { type: "CLOSE_UNRESOLVED"; caseId: string; explanation: string }
   | { type: "ASSIGN_COLLEAGUE"; caseId: string; contact: Omit<ContactPoint, "id" | "valid"> }
-  | { type: "COMPLETE_TASK"; taskId: string };
+  | { type: "COMPLETE_TASK"; taskId: string }
+  | {
+      type: "ADD_SUBJECT";
+      kind: SubjectKind;
+      name: string;
+      parentSubjectId?: string;
+      productIds?: string[];
+      supplierId?: string;
+      quantity?: number;
+      unit?: string;
+      source?: AssignmentSource;
+      createdBy?: string;
+      generateRequirements?: boolean;
+    }
+  | {
+      type: "CORRECT_SUBJECT_RELATIONSHIP";
+      relationshipId: string;
+      childSubjectId?: string;
+      quantity?: number;
+      unit?: string;
+      createdBy?: string;
+    }
+  | { type: "REMOVE_SUBJECT_RELATIONSHIP"; relationshipId: string; createdBy?: string }
+  | {
+      type: "MARK_SUBJECT_UNKNOWN";
+      subjectId: string;
+      createdBy?: string;
+    };
 
 export interface EngineResult {
   state: EngineState;

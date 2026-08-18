@@ -216,6 +216,42 @@ export function createSeedState(): EngineState {
     { id: "evt-13", caseId: "SRC-184850", type: "case.escalated", actor: "SOURCE_SYSTEM", timestamp: "2026-08-16T09:00:00.000Z", policy: "standard_supplier_14d", detail: "Escalated to procurement owner." },
   ];
 
+  state.subjects = [
+    { id: "urban-chair-04", kind: "PRODUCT", name: "Urban Chair 04", createdAt: "2026-08-01T09:00:00.000Z", source: "IMPORTED", sourceReference: "products.xlsx" },
+    { id: "AL-FRAME-881", kind: "COMPONENT", name: "Aluminium Frame", createdAt: "2026-08-01T09:00:00.000Z", source: "IMPORTED" },
+    { id: "ALU-6061", kind: "MATERIAL", name: "Aluminium 6061", createdAt: "2026-08-01T09:00:00.000Z", source: "AUTO_DETECTED", confidence: 92 },
+    { id: "TEXTILE-04", kind: "COMPONENT", name: "Textile", createdAt: "2026-08-01T09:00:00.000Z", source: "IMPORTED" },
+    { id: "PACK-04", kind: "PACKAGING", name: "Packaging", createdAt: "2026-08-01T09:00:00.000Z", source: "IMPORTED" },
+    { id: "FASTEN-04", kind: "COMPONENT", name: "Fasteners", createdAt: "2026-08-01T09:00:00.000Z", source: "IMPORTED" },
+  ];
+  state.subjectRelationships = [
+    { id: "srel-1", parentSubjectId: "urban-chair-04", childSubjectId: "AL-FRAME-881", source: "IMPORTED", createdAt: "2026-08-01T09:00:00.000Z" },
+    { id: "srel-2", parentSubjectId: "AL-FRAME-881", childSubjectId: "ALU-6061", source: "AUTO_DETECTED", createdAt: "2026-08-01T09:00:00.000Z", confidence: 92 },
+    { id: "srel-3", parentSubjectId: "urban-chair-04", childSubjectId: "TEXTILE-04", source: "IMPORTED", createdAt: "2026-08-01T09:00:00.000Z" },
+    { id: "srel-4", parentSubjectId: "urban-chair-04", childSubjectId: "PACK-04", source: "IMPORTED", createdAt: "2026-08-01T09:00:00.000Z" },
+    { id: "srel-5", parentSubjectId: "urban-chair-04", childSubjectId: "FASTEN-04", source: "IMPORTED", createdAt: "2026-08-01T09:00:00.000Z" },
+  ];
+  state.subjectIdentifiers = [
+    { id: "sid-1", canonicalSubjectId: "urban-chair-04", scheme: "SKU", value: "URBAN-CHAIR-04" },
+    { id: "sid-2", canonicalSubjectId: "urban-chair-04", scheme: "GTIN", value: "8712345678901" },
+    { id: "sid-3", canonicalSubjectId: "AL-FRAME-881", scheme: "MPN", value: "ALF881" },
+    { id: "sid-4", canonicalSubjectId: "AL-FRAME-881", scheme: "SKU", value: "FR-1288" },
+  ];
+  state.tenantSubjectMappings = [
+    {
+      id: "map-1",
+      tenantId: "acme",
+      sourceSystem: "erp",
+      sourceRecordId: "FR-1288",
+      canonicalSubjectId: "AL-FRAME-881",
+      matchMethod: "deterministic",
+      confidence: 99,
+      decision: "auto",
+      modelVersion: "heuristic-v0",
+      createdAt: "2026-08-01T09:00:00.000Z",
+    },
+  ];
+
   return state;
 }
 

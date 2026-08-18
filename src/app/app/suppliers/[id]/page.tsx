@@ -5,8 +5,7 @@ import { notFound, useParams } from "next/navigation";
 import { supplierById } from "@/lib/source/demo-data";
 import { Metric, SourceButton, SourceLabel, StatusPill } from "@/components/source/ui";
 import { CaseStatePill } from "@/components/source/case-status";
-import { actorLabelForViewer, supplierHealth } from "@/domain/source/queries";
-import { useEngineState } from "@/domain/source/store";
+import { useSourceQuery } from "@/client/source/api";
 
 const SUPPLIER_HEALTH_COPY: Record<string, { overdue: number; forwardedUpstream: number; confidential: number; awaitingEvidence: number; conflict: number }> = {
   "supplier-a": { overdue: 2, forwardedUpstream: 7, confidential: 3, awaitingEvidence: 4, conflict: 1 },
@@ -15,13 +14,11 @@ const SUPPLIER_HEALTH_COPY: Record<string, { overdue: number; forwardedUpstream:
 export default function SupplierDetailPage() {
   const params = useParams<{ id: string }>();
   const supplier = supplierById(params.id);
-  const engine = useEngineState();
+  const { data } = useSourceQuery<{ cases: { id: string; propertyLabel: string; actorLabel: string; nextAction: string; state: import("@/domain/source").ResolutionCaseState; supplierId?: string }[] }>("/api/source/cases?filter=all");
   if (!supplier) notFound();
-  const computed = supplierHealth(engine, supplier.id);
+  const computed = { overdue: 0, forwardedUpstream: 0, confidential: 0, awaitingEvidence: 0, conflict: 0 };
   const health = SUPPLIER_HEALTH_COPY[supplier.id] ?? computed;
-  const cases = engine.cases.filter(
-    (c) => c.supplierId === supplier.id || engine.attempts.some((a) => a.caseId === c.id && a.actorId === supplier.id)
-  );
+  const cases = (data?.cases ?? []).filter((c) => c.supplierId === supplier.id);
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -63,15 +60,14 @@ export default function SupplierDetailPage() {
           <h2 className="font-[family-name:var(--font-space)] text-[20px]">Open resolution cases</h2>
           <ul className="mt-3 divide-y divide-[#101A15]/8 border border-[#101A15]/10 bg-[#FBFCFA]">
             {cases.map((c) => {
-              const requirement = engine.requirements.find((r) => r.id === c.requirementId);
               return (
                 <li key={c.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
                   <div>
                     <Link href={`/app/missing/${c.id}`} className="text-[13px] hover:underline">
-                      {c.id} · {requirement?.propertyLabel}
+                      {c.id} · {c.propertyLabel}
                     </Link>
                     <p className="text-[12px] text-[#101A15]/55">
-                      {actorLabelForViewer(engine, c.currentActorId, true)} · {c.nextAction}
+                      {c.actorLabel} · {c.nextAction}
                     </p>
                   </div>
                   <CaseStatePill state={c.state} />
