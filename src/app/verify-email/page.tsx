@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/infrastructure/auth/supabase/browser";
+import { resendAuthErrorMessage, verifyEmailErrorMessage } from "@/infrastructure/auth/supabase/pkce";
 import { SourceButton } from "@/components/source/ui";
 import { AuthChrome } from "@/components/source/auth-chrome";
 import { api } from "@/client/source/api";
@@ -12,26 +13,40 @@ function VerifyEmail() {
   const searchParams = useSearchParams();
   const email = searchParams.get("email");
   const error = searchParams.get("error");
-  const [notice, setNotice] = useState<string | null>(
-    error === "expired" ? "That verification link has expired or already been used." : null
-  );
+  const [notice, setNotice] = useState<string | null>(verifyEmailErrorMessage(error));
+  const [noticeIsError, setNoticeIsError] = useState(Boolean(verifyEmailErrorMessage(error)));
   const [pending, setPending] = useState(false);
 
   async function resend() {
     setPending(true);
     try {
       const config = await api<{ identityProvider: "supabase" | "test" }>("/api/auth/config");
-      if (config.identityProvider === "supabase" && email) {
-        const supabase = createBrowserSupabaseClient();
-        await supabase.auth.resend({
-          type: "signup",
-          email,
-          options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=/onboarding/organisation` },
-        });
+      if (config.identityProvider !== "supabase") {
+        setNotice("If this email can be used, we sent another verification link.");
+        setNoticeIsError(false);
+        return;
+      }
+      if (!email) {
+        setNotice("Enter the email you signed up with, then request a new verification link.");
+        setNoticeIsError(true);
+        return;
+      }
+      const supabase = createBrowserSupabaseClient();
+      const { error: resendError } = await supabase.auth.resend({
+        type: "signup",
+        email,
+        options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=/onboarding/organisation` },
+      });
+      if (resendError) {
+        setNotice(resendAuthErrorMessage(resendError));
+        setNoticeIsError(true);
+        return;
       }
       setNotice("If this email can be used, we sent another verification link.");
-    } catch {
-      setNotice("If this email can be used, we sent another verification link.");
+      setNoticeIsError(false);
+    } catch (err) {
+      setNotice(resendAuthErrorMessage(err));
+      setNoticeIsError(true);
     } finally {
       setPending(false);
     }
@@ -39,7 +54,9 @@ function VerifyEmail() {
 
   return (
     <AuthChrome title="Check your inbox" description="We've sent a verification link to your email.">
-      {notice ? <p className="mb-6 text-[13px] text-[#101A15]/70">{notice}</p> : null}
+      {notice ? (
+        <p className={`mb-6 text-[13px] ${noticeIsError ? "text-[#B26B2C]" : "text-[#101A15]/70"}`}>{notice}</p>
+      ) : null}
       <div className="space-y-3">
         <SourceButton className="w-full" onClick={() => void resend()} disabled={pending}>
           {pending ? "Sending…" : "Resend email"}

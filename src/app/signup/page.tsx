@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/infrastructure/auth/supabase/browser";
+import { signupAuthErrorMessage } from "@/infrastructure/auth/supabase/pkce";
 import { SourceButton } from "@/components/source/ui";
 import { AuthChrome, AuthField } from "@/components/source/auth-chrome";
 import { api } from "@/client/source/api";
@@ -30,7 +31,7 @@ export default function SignupPage() {
           options: { emailRedirectTo: `${origin}/auth/callback?next=/onboarding/organisation` },
         });
         if (signUpError) {
-          setError("We couldn't create the account. Try again.");
+          setError(signupAuthErrorMessage(signUpError));
           return;
         }
         router.push(`/verify-email?email=${encodeURIComponent(email)}`);
@@ -42,8 +43,8 @@ export default function SignupPage() {
       });
       router.push("/onboarding/organisation");
       router.refresh();
-    } catch {
-      setError("We couldn't create the account. Try again.");
+    } catch (err) {
+      setError(signupAuthErrorMessage(err));
     } finally {
       setPending(false);
     }
