@@ -18,6 +18,7 @@ import { structuredCommandAudit } from "../audit";
 import type { AnyPrincipal, CommandEnvelope, CommandOutcome, Principal } from "../types";
 import { SourceError } from "../types";
 import { queueSupplierOutreach } from "@/server/source/outreach";
+import { durableEvidenceRequired } from "@/infrastructure/runtime";
 
 function caseIdOf(command: Command): string | undefined {
   if ("caseId" in command) return command.caseId;
@@ -116,6 +117,7 @@ export async function dispatchCommand(args: {
   rateLimiter?: RateLimiter;
   clientIp?: string;
   tokenFingerprint?: string;
+  requireDurableEvidence?: boolean;
 }): Promise<CommandOutcome> {
   const now = args.now ?? new Date();
   const { store, principal, envelope } = args;
@@ -145,7 +147,15 @@ export async function dispatchCommand(args: {
   }
 
   try {
-  return await store.transaction(async (tx) => executeCommand({ tx, principal, envelope, now }));
+  return await store.transaction(async (tx) =>
+    executeCommand({
+      tx,
+      principal,
+      envelope,
+      now,
+      requireDurableEvidence: args.requireDurableEvidence,
+    })
+  );
   } catch (error) {
     if (error instanceof SourceError && error.code === "CASE_CHANGED") metricInc(METRICS.commandsCaseChanged);
     throw error;
@@ -157,6 +167,7 @@ async function executeCommand(args: {
   principal: AnyPrincipal;
   envelope: CommandEnvelope;
   now: Date;
+  requireDurableEvidence?: boolean;
 }): Promise<CommandOutcome> {
   const { tx, principal, envelope, now } = args;
   const organisationId = principal.organisationId;
@@ -175,6 +186,15 @@ async function executeCommand(args: {
     if (envelope.expectedVersion !== undefined && resolution.version !== envelope.expectedVersion) {
       throw new SourceError("CASE_CHANGED", "This case changed while you were working. Refresh to continue.", 409);
     }
+  }
+
+  if (envelope.command.type === "SUBMIT_RESPONSE") {
+    envelope.command = await bindSubmitResponseEvidence({
+      store: tx,
+      principal,
+      command: envelope.command,
+      requireDurable: args.requireDurableEvidence ?? durableEvidenceFromEnv(),
+    });
   }
 
   const result = applyCommand(state, envelope.command, now);
@@ -249,4 +269,58 @@ export function assertReadinessInvariant(state: EngineState) {
       throw new Error(`Readiness invariant failed for ${claim.id}: stored=${claim.ready} evaluated=${evaluated}`);
     }
   }
+}
+
+function durableEvidenceFromEnv(): boolean {
+  try {
+    return durableEvidenceRequired();
+  } catch {
+    return false;
+  }
+}
+
+async function bindSubmitResponseEvidence(args: {
+  store: PersistencePort;
+  principal: AnyPrincipal;
+  command: Extract<Command, { type: "SUBMIT_RESPONSE" }>;
+  requireDurable: boolean;
+}): Promise<Extract<Command, { type: "SUBMIT_RESPONSE" }>> {
+  const evidence = args.command.evidence;
+  if (!evidence) return args.command;
+  if (!evidence.storageObjectId) {
+    if (args.requireDurable) {
+      throw new SourceError("VALIDATION", "Upload a real evidence file. Filename-only submissions are not accepted.", 400);
+    }
+    return args.command;
+  }
+  const object = await args.store.getStorageObject(evidence.storageObjectId);
+  if (!object || object.organisationId !== args.principal.organisationId || object.deletedAt) {
+    throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
+  }
+  if (object.purpose !== "EVIDENCE" || object.availability !== "AVAILABLE") {
+    throw new SourceError("VALIDATION", "Evidence is not available yet.", 400);
+  }
+  if (args.principal.kind === "supplier_portal") {
+    if (object.createdViaPortalGrantId !== args.principal.grantId) {
+      throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
+    }
+    if (object.caseId && object.caseId !== args.command.caseId) {
+      throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
+    }
+    if (object.caseId && !args.principal.allowedCaseIds.includes(object.caseId)) {
+      throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
+    }
+  }
+  return {
+    ...args.command,
+    evidence: {
+      ...evidence,
+      filename: object.originalFilename,
+      sha256: object.sha256,
+      mimeType: object.mimeType,
+      sizeBytes: object.sizeBytes,
+      storageObjectId: object.id,
+      availability: "AVAILABLE",
+    },
+  };
 }

@@ -33,6 +33,11 @@ if (process.env.NODE_ENV === "production") {
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["pg"],
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "21mb",
+    },
+  },
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },

@@ -86,8 +86,13 @@ Local explicit Postgres: `SOURCE_PERSISTENCE=postgres` plus `SOURCE_APP_DATABASE
 | `SOURCE_MIGRATOR_DATABASE_URL` | `npm run db:migrate` / deploy migrate job only | Higher-privilege DDL. **Not** the serverless app. |
 | `SOURCE_SESSION_SECRET` | Application runtime | Signed session cookies. |
 | `SOURCE_OPAQUE_REF_SECRET` | Application runtime | Opaque evidence refs. |
-| `SOURCE_STORAGE_SIGNING_SECRET` | Application runtime | Temporary evidence URL HMAC. Storage bytes themselves are PR B2. |
-| `SUPABASE_SERVICE_ROLE_KEY` | Unused in PR A | Not used for domain I/O. Must never reach the browser. |
+| `SOURCE_STORAGE_SIGNING_SECRET` | Application runtime | HMAC for memory signed reads in tests/local. |
+| `SUPABASE_SERVICE_ROLE_KEY` | `SupabaseObjectStorage` only | Server-only infrastructure credential. Bypasses Storage RLS. Never used to authorize users. Never `NEXT_PUBLIC_`. Required in preview/production. |
+| `SOURCE_OBJECT_STORAGE` | Local only | `memory` \| `supabase`. Preview/production always `supabase`. |
+| `SOURCE_IMPORT_BUCKET` | Application runtime | Default `source-imports`. |
+| `SOURCE_EVIDENCE_BUCKET` | Application runtime | Default `source-evidence`. |
+| `SOURCE_SIGNED_READ_TTL_SECONDS` | Application runtime | Default `300`. |
+| `SOURCE_TEMP_UPLOAD_TTL_HOURS` | Application runtime | Default `24`. |
 | `SOURCE_IDENTITY_PROVIDER` | Local only | `supabase` \| `test`. Rejected in preview/production if `test`. |
 | `SOURCE_INVITATION_TTL_DAYS` | Application runtime | Invitation expiry. Default `7`. |
 | `SOURCE_EXPOSE_INVITE_LINKS` | Local only | Returns invite URLs for tests. Never set in preview/production. |
@@ -123,6 +128,10 @@ SOURCE_APP_DATABASE_URL=<transaction pooler DSN as source_app>
 SOURCE_SESSION_SECRET=<preview secret>
 SOURCE_OPAQUE_REF_SECRET=<preview secret>
 SOURCE_STORAGE_SIGNING_SECRET=<preview secret>
+SUPABASE_SERVICE_ROLE_KEY=<Preview project service role>
+SOURCE_IMPORT_BUCKET=source-imports
+SOURCE_EVIDENCE_BUCKET=source-evidence
+SOURCE_SIGNED_READ_TTL_SECONDS=300
 ```
 
 `SOURCE_MIGRATOR_DATABASE_URL` belongs in the migrate/deploy job, not necessarily in the serverless runtime.
@@ -138,6 +147,10 @@ SOURCE_APP_DATABASE_URL=<transaction pooler DSN as source_app>
 SOURCE_SESSION_SECRET=<production secret>
 SOURCE_OPAQUE_REF_SECRET=<production secret>
 SOURCE_STORAGE_SIGNING_SECRET=<production secret>
+SUPABASE_SERVICE_ROLE_KEY=<Production project service role>
+SOURCE_IMPORT_BUCKET=source-imports
+SOURCE_EVIDENCE_BUCKET=source-evidence
+SOURCE_SIGNED_READ_TTL_SECONDS=300
 ```
 
 Again: migrator DSN in the migrate job only.
@@ -200,10 +213,10 @@ If preview/production cannot reach Postgres, SOURCE does not switch to memory.
 Safe health payload (`GET /api/health`):
 
 ```json
-{ "database": "ok", "persistence": "postgres" }
+{ "database": "ok", "persistence": "postgres", "storage": "ok" }
 ```
 
-No DSNs, roles, or server metadata.
+No DSNs, roles, bucket secrets, or service-role material. Storage `error` is reported; it does not by itself mark evidence invalid. Database failure still returns 503.
 
 Production boots against an **empty** database. Seeded Acme / Nordic / demo portal tokens are for tests and `npm run db:seed` (local only). A new organisation may have no `engine_states` row; the first load returns valid empty SOURCE state; the first mutation persists the aggregate (JSONB `engine_states` per organisation).
 
@@ -221,14 +234,15 @@ Persisted in Postgres:
 - Outbox (pending mail stays pending; Resend is not in this PR)
 - Portal grants, sessions
 
-**Not durable in B1 (Supabase Storage is PR B2):**
+**Durable in B2 (private Storage + Postgres index):**
 
-- Original uploaded file bytes
-- Evidence object bytes in `MemoryEvidenceStorage`
+- Original import source bytes (`source-imports`)
+- Evidence object bytes (`source-evidence`)
+- `storage_objects` ownership metadata
 
-ImportJob **metadata and events** survive. Do not treat raw upload bytes as durable until Storage is wired.
+Postgres backup alone does not restore Storage bytes. See `docs/architecture/storage.md`.
 
-Email remains outbox-only. Resend is PR C. B1 only proves queued communication survives process restart.
+Email remains outbox-only. Resend is PR C.
 
 Demo HMAC login is **removed**. Preview/production use Supabase Auth (`SupabaseIdentityProvider`). Local/CI may use `TestIdentityProvider`. Tenant context still comes from membership rows, never from browser `organisationId` or `user_metadata`.
 
@@ -263,5 +277,9 @@ Migrations create `source_app` and RLS when applied with migrator credentials. A
 6. Confirm database network allow-list / Supabase connectivity so Vercel can reach the pooler.
 7. Confirm Preview env has the **dev** `NEXT_PUBLIC_SUPABASE_URL` and Production has the **prod** URL.
 8. Never copy production DSNs into Preview, and never point CI at Supabase.
+9. Put **this environment's** `SUPABASE_SERVICE_ROLE_KEY` in Vercel (Preview key from preview project, Production key from production project). Never mix.
+10. Create private buckets `source-imports` and `source-evidence` (`npm run storage:bootstrap` or dashboard). They must not be public.
 
-Until those hosted values exist, CI and local tests still prove persistence against isolated Postgres. Live preview/production boot against the real projects is blocked only on that human placement of secrets — not on application code.
+Until hosted Storage secrets and buckets exist, CI uses `MemoryObjectStorage`. Live preview/production file upload is blocked on that human placement — not on application code.
+
+See `docs/architecture/storage.md` and `docs/security/data-inventory.md`.

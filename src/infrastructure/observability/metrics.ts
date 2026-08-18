@@ -37,4 +37,13 @@ export const METRICS = {
   outboxPending: "outbox.pending",
   outboxDeadLetter: "outbox.dead_letter",
   outboxRetry: "outbox.retry_count",
+  storageUploadsStarted: "storage.uploads_started",
+  storageUploadFailures: "storage.upload_failures",
+  storageFinalizations: "storage.finalizations",
+  storageFinalizationFailures: "storage.finalization_failures",
+  storageBytesStored: "storage.bytes_stored",
+  storageSignedReadFailures: "storage.signed_read_failures",
+  storageSignedReads: "storage.signed_reads",
+  storageRejected: "storage.rejected",
+  storageTempCleanup: "storage.temp_cleanup",
 } as const;

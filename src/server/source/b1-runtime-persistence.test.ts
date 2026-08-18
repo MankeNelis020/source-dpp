@@ -214,7 +214,7 @@ describe("B1 runtime persistence survival", () => {
     const { checkPostgresHealth } = await import("@/infrastructure/database/health");
     const pool = createPostgresPool(appUrl, "app");
     const health = await checkPostgresHealth(pool);
-    expect(health).toEqual({ database: "ok", persistence: "postgres" });
+    expect(health).toEqual({ database: "ok", persistence: "postgres", storage: "ok" });
     const { rows } = await pool.query("SELECT current_user AS u");
     expect(rows[0].u).toBe("source_app");
     await pool.end();

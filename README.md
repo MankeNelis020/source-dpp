@@ -6,6 +6,7 @@ This repository is a strangler migration of the Missing Information Engine: doma
 
 See `docs/architecture/p0-production.md` for the P0 audit, schema, threat model, and test plan.
 See `docs/architecture/auth-and-organisations.md` for Supabase Auth and organisation membership.
+See `docs/architecture/storage.md` for private import and evidence files.
 See `docs/operations/environments.md` for local, preview, and production configuration.
 
 ```bash

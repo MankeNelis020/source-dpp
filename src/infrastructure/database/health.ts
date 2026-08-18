@@ -5,6 +5,7 @@ import type { PersistenceAdapterKind } from "@/infrastructure/environment/source
 export interface PersistenceHealth {
   database: "ok" | "error";
   persistence: PersistenceAdapterKind;
+  storage?: "ok" | "error";
 }
 
 export async function checkPostgresHealth(pool: Pool): Promise<PersistenceHealth> {
@@ -29,7 +30,8 @@ export async function checkPostgresHealth(pool: Pool): Promise<PersistenceHealth
     await client.query("SELECT 1 FROM outbox_events LIMIT 0");
     await client.query("SELECT 1 FROM import_jobs LIMIT 0");
     await client.query("SELECT 1 FROM organisations LIMIT 0");
-    return { database: "ok", persistence: "postgres" };
+    await client.query("SELECT 1 FROM storage_objects LIMIT 0");
+    return { database: "ok", persistence: "postgres", storage: "ok" };
   } catch (error) {
     if (error instanceof SourceEnvironmentError) throw error;
     throw new SourceEnvironmentError("SOURCE persistence health check failed: database unreachable.");
@@ -39,5 +41,5 @@ export async function checkPostgresHealth(pool: Pool): Promise<PersistenceHealth
 }
 
 export function memoryHealth(): PersistenceHealth {
-  return { database: "ok", persistence: "memory" };
+  return { database: "ok", persistence: "memory", storage: "ok" };
 }

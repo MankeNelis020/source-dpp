@@ -1090,10 +1090,13 @@ function submitResponse(
 
   let evidence: EvidenceRecord | undefined;
   if (command.evidence) {
-    evidence = {
+    const existing = command.evidence.storageObjectId
+      ? state.evidence.find((item) => item.storageObjectId === command.evidence?.storageObjectId)
+      : undefined;
+    evidence = existing ?? {
       id: id(state, "ev"),
       filename: command.evidence.filename,
-      sha256: `sha-${state.seq}`,
+      sha256: command.evidence.sha256 ?? `sha-${state.seq}`,
       issuer: state.actors.find((a) => a.id === resolution.currentActorId)?.name ?? "Supplier",
       ownerActorId: resolution.currentActorId ?? "unknown",
       validUntil: addDays(now, 400),
@@ -1103,8 +1106,24 @@ function submitResponse(
       linkedClaimIds: [],
       extractedValue: command.evidence.extractedValue,
       extractionConfidence: command.evidence.confidence,
+      storageObjectId: command.evidence.storageObjectId,
+      mimeType: command.evidence.mimeType,
+      sizeBytes: command.evidence.sizeBytes,
+      availability: command.evidence.availability ?? (command.evidence.storageObjectId ? "AVAILABLE" : undefined),
+      supersedesEvidenceId: command.evidence.supersedesEvidenceId,
     };
-    state.evidence.push(evidence);
+    if (existing) {
+      if (command.evidence.scope) existing.scope = command.evidence.scope;
+      if (command.evidence.extractedValue) existing.extractedValue = command.evidence.extractedValue;
+      if (command.evidence.confidence !== undefined) existing.extractionConfidence = command.evidence.confidence;
+    }
+    if (!existing) {
+      if (command.evidence.supersedesEvidenceId) {
+        const previous = state.evidence.find((item) => item.id === command.evidence?.supersedesEvidenceId);
+        if (previous) previous.supersededByEvidenceId = evidence.id;
+      }
+      state.evidence.push(evidence);
+    }
     emit({
       type: "evidence.uploaded",
       caseId: command.caseId,

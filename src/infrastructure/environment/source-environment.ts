@@ -17,6 +17,12 @@ export const PRODUCTION_PROJECT_REF = "vezhdbzizniurehclxpg";
 export type RuntimeEnvironment = "local" | "preview" | "production";
 export type PersistenceAdapterKind = "memory" | "postgres";
 export type IdentityProviderKind = "supabase" | "test";
+export type ObjectStorageKind = "memory" | "supabase";
+
+export const DEFAULT_IMPORT_BUCKET = "source-imports";
+export const DEFAULT_EVIDENCE_BUCKET = "source-evidence";
+export const DEFAULT_SIGNED_READ_TTL_SECONDS = 300;
+export const DEFAULT_TEMP_UPLOAD_TTL_HOURS = 24;
 
 export class SourceEnvironmentError extends Error {
   readonly code = "SOURCE_ENVIRONMENT_MISMATCH";
@@ -31,14 +37,23 @@ export interface SourceEnvironment {
   runtime: RuntimeEnvironment;
   persistence: PersistenceAdapterKind;
   identityProvider: IdentityProviderKind;
+  objectStorage: ObjectStorageKind;
   supabaseUrl?: string;
   appDatabaseUrl?: string;
   migratorDatabaseUrl?: string;
   supabaseAnonKey?: string;
-  /** Server-only. Never expose to client bundles. Never used for domain I/O. */
+  /**
+   * Server-only. Isolated in SupabaseObjectStorage.
+   * Never expose to client bundles. Never used to authorize user behavior.
+   * Service role bypasses Storage RLS — SOURCE policy decides first.
+   */
   supabaseServiceRoleKey?: string;
   appPublicUrl?: string;
   invitationTtlDays: number;
+  importBucket: string;
+  evidenceBucket: string;
+  signedReadTtlSeconds: number;
+  tempUploadTtlHours: number;
 }
 
 export type EnvMap = Record<string, string | undefined>;
@@ -64,6 +79,11 @@ export function loadSourceEnvironment(
   const invitationTtlDays = Number(env.SOURCE_INVITATION_TTL_DAYS ?? 7);
   const identityProvider = resolveIdentityProvider(runtime, env, supabaseUrl, supabaseAnonKey);
   const persistence = mode === "migrator" ? "postgres" : resolvePersistenceAdapter(runtime, env);
+  const objectStorage = resolveObjectStorageAdapter(runtime, env);
+  const importBucket = trim(env.SOURCE_IMPORT_BUCKET) ?? DEFAULT_IMPORT_BUCKET;
+  const evidenceBucket = trim(env.SOURCE_EVIDENCE_BUCKET) ?? DEFAULT_EVIDENCE_BUCKET;
+  const signedReadTtlSeconds = positiveInt(env.SOURCE_SIGNED_READ_TTL_SECONDS, DEFAULT_SIGNED_READ_TTL_SECONDS);
+  const tempUploadTtlHours = positiveInt(env.SOURCE_TEMP_UPLOAD_TTL_HOURS, DEFAULT_TEMP_UPLOAD_TTL_HOURS);
 
   assertProjectIsolation({
     runtime,
@@ -97,6 +117,7 @@ export function loadSourceEnvironment(
       runtime,
       persistence: "postgres",
       identityProvider,
+      objectStorage,
       supabaseUrl,
       appDatabaseUrl,
       migratorDatabaseUrl,
@@ -104,6 +125,10 @@ export function loadSourceEnvironment(
       supabaseServiceRoleKey,
       appPublicUrl,
       invitationTtlDays: Number.isFinite(invitationTtlDays) && invitationTtlDays > 0 ? invitationTtlDays : 7,
+      importBucket,
+      evidenceBucket,
+      signedReadTtlSeconds,
+      tempUploadTtlHours,
     };
   }
 
@@ -138,7 +163,30 @@ export function loadSourceEnvironment(
         "SOURCE environment configuration mismatch: preview and production cannot use the test identity provider."
       );
     }
+    if (objectStorage !== "supabase") {
+      throw new SourceEnvironmentError(
+        "SOURCE environment configuration mismatch: memory object storage is not allowed in preview or production."
+      );
+    }
+    if (!supabaseServiceRoleKey) {
+      throw new SourceEnvironmentError(
+        "SOURCE environment configuration mismatch: SUPABASE_SERVICE_ROLE_KEY is required for object storage."
+      );
+    }
     assertAppRole(appDatabaseUrl);
+  }
+
+  if (objectStorage === "supabase") {
+    if (!supabaseUrl) {
+      throw new SourceEnvironmentError(
+        "SOURCE environment configuration mismatch: NEXT_PUBLIC_SUPABASE_URL is required for object storage."
+      );
+    }
+    if (!supabaseServiceRoleKey) {
+      throw new SourceEnvironmentError(
+        "SOURCE environment configuration mismatch: SUPABASE_SERVICE_ROLE_KEY is required for object storage."
+      );
+    }
   }
 
   if (persistence === "postgres") {
@@ -158,6 +206,7 @@ export function loadSourceEnvironment(
     runtime,
     persistence,
     identityProvider,
+    objectStorage,
     supabaseUrl,
     appDatabaseUrl,
     migratorDatabaseUrl,
@@ -165,6 +214,10 @@ export function loadSourceEnvironment(
     supabaseServiceRoleKey,
     appPublicUrl,
     invitationTtlDays: Number.isFinite(invitationTtlDays) && invitationTtlDays > 0 ? invitationTtlDays : 7,
+    importBucket,
+    evidenceBucket,
+    signedReadTtlSeconds,
+    tempUploadTtlHours,
   };
 }
 
@@ -239,6 +292,25 @@ function resolveIdentityProvider(
   if (requested === "supabase") return "supabase";
   if (supabaseUrl && supabaseAnonKey) return "supabase";
   return "test";
+}
+
+function resolveObjectStorageAdapter(runtime: RuntimeEnvironment, env: EnvMap): ObjectStorageKind {
+  const requested = trim(env.SOURCE_OBJECT_STORAGE)?.toLowerCase();
+  if (requested && requested !== "memory" && requested !== "supabase") {
+    throw new SourceEnvironmentError(
+      "SOURCE environment configuration mismatch: SOURCE_OBJECT_STORAGE must be memory or supabase."
+    );
+  }
+  if (runtime === "preview" || runtime === "production") {
+    if (requested === "memory") {
+      throw new SourceEnvironmentError(
+        "SOURCE environment configuration mismatch: memory object storage is not allowed in preview or production."
+      );
+    }
+    return "supabase";
+  }
+  if (requested === "supabase") return "supabase";
+  return "memory";
 }
 
 function resolvePersistenceAdapter(runtime: RuntimeEnvironment, env: EnvMap): PersistenceAdapterKind {
@@ -335,4 +407,10 @@ function assertMigratorRole(url: string) {
 function trim(value: string | undefined): string | undefined {
   const next = value?.trim();
   return next ? next : undefined;
+}
+
+function positiveInt(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.floor(parsed);
 }

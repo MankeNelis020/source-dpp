@@ -10,6 +10,13 @@ import { mappingConfidence, parseDecimal, stripBom } from "@/domain/source/norma
 import { buildPilotRequirement, PILOT_DATASET_ID, PILOT_DATASET_VERSION, pilotPropertiesForKind } from "@/domain/source/pilot-dataset";
 import { productIdsForSubject } from "@/domain/source/subjects";
 import { capturePilotSnapshot } from "@/domain/source/analytics";
+import type { ObjectStorage } from "@/infrastructure/storage/port";
+import { getRuntimeObjectStorage } from "@/infrastructure/runtime";
+import { basenameHint, sha256Hex } from "@/infrastructure/storage/files";
+import { IMPORT_BUCKET } from "@/infrastructure/storage/port";
+import { loadStoredText } from "@/server/source/uploads";
+import { logOperational } from "@/infrastructure/observability/metrics";
+import { randomUUID } from "node:crypto";
 
 const STAGES = [
   "PARSING",
@@ -226,11 +233,66 @@ async function emit(store: PersistencePort, job: ImportJob, type: string, payloa
   return event;
 }
 
-export async function createImportJob(store: PersistencePort, principal: Principal, files: CsvBundle, now = new Date()): Promise<ImportJob> {
+export async function persistImportSources(
+  store: PersistencePort,
+  principal: Principal,
+  files: CsvBundle,
+  now: Date,
+  objectStorage: ObjectStorage
+): Promise<NonNullable<ImportJob["sourceFiles"]>> {
+  const sourceFiles: NonNullable<ImportJob["sourceFiles"]> = {};
+  for (const [part, text] of Object.entries(files) as [keyof CsvBundle, string | undefined][]) {
+    if (!text) continue;
+    const bytes = Buffer.from(text, "utf8");
+    const id = store.nextId("so");
+    const key = `o/${randomUUID()}`;
+    const digest = sha256Hex(bytes);
+    await objectStorage.putImmutable({
+      bucket: IMPORT_BUCKET,
+      key,
+      bytes,
+      mimeType: "text/csv",
+      sha256: digest,
+    });
+    await store.saveStorageObject({
+      id,
+      organisationId: principal.organisationId,
+      bucket: IMPORT_BUCKET,
+      objectKey: key,
+      purpose: "IMPORT_SOURCE",
+      availability: "AVAILABLE",
+      originalFilename: `${part}.csv`,
+      mimeType: "text/csv",
+      sizeBytes: bytes.byteLength,
+      sha256: digest,
+      createdByPrincipalId: principal.userId,
+      scanStatus: "CLEAN",
+      createdAt: now.toISOString(),
+      finalizedAt: now.toISOString(),
+    });
+    sourceFiles[part] = {
+      filename: `${part}.csv`,
+      sizeBytes: bytes.byteLength,
+      storageObjectId: id,
+      mimeType: "text/csv",
+    };
+  }
+  return sourceFiles;
+}
+
+export async function createImportJob(
+  store: PersistencePort,
+  principal: Principal,
+  files: CsvBundle,
+  now = new Date(),
+  options?: { objectStorage?: ObjectStorage; sourceFiles?: ImportJob["sourceFiles"] }
+): Promise<ImportJob> {
   if (!hasCapability(principal, "import:manage")) {
     throw new SourceError("FORBIDDEN", "You cannot start an import.", 403);
   }
   assertSafeImportPayload(files);
+  const objectStorage = options?.objectStorage ?? getRuntimeObjectStorage();
+  const sourceFiles = options?.sourceFiles ?? (await persistImportSources(store, principal, files, now, objectStorage));
   const products = files.products ? parseCsv(files.products) : { headers: [], rows: [] };
   const mapping = proposeMapping(products.headers);
   const job: ImportJob = {
@@ -245,9 +307,18 @@ export async function createImportJob(store: PersistencePort, principal: Princip
     startedAt: now.toISOString(),
     mapping,
     mappingConfidence: Object.fromEntries(Object.entries(mapping).map(([k, v]) => [k, mappingConfidence(v)])),
+    sourceStorageObjectIds: {
+      products: sourceFiles.products?.storageObjectId,
+      suppliers: sourceFiles.suppliers?.storageObjectId,
+      bom: sourceFiles.bom?.storageObjectId,
+      materials: sourceFiles.materials?.storageObjectId,
+    },
+    sourceFiles,
   };
   await store.saveImportJob(job);
+  await emit(store, job, "IMPORT_FILE_STORED", { files: Object.keys(sourceFiles).length }, now);
   await emit(store, job, "stage.started", { stage: "UPLOADED" }, now);
+  logOperational("import.file_stored", { organisationId: principal.organisationId, jobId: job.id });
   if (store.saveMappingProfile) {
     await store.saveMappingProfile({
       id: store.nextId("map"),
@@ -259,24 +330,105 @@ export async function createImportJob(store: PersistencePort, principal: Princip
       updatedAt: now.toISOString(),
     });
   }
-  return runImportJob(store, principal, job.id, files, now);
+  try {
+    return await runImportJob(store, principal, job.id, files, now, { objectStorage });
+  } catch (error) {
+    const failed = await store.getImportJob(job.id);
+    if (failed && failed.state !== "FAILED" && failed.state !== "PARTIAL" && failed.state !== "COMPLETE") {
+      failed.state = "FAILED";
+      failed.completedAt = now.toISOString();
+      await store.saveImportJob(failed);
+    }
+    throw error;
+  }
+}
+
+export async function createImportJobFromStorage(
+  store: PersistencePort,
+  principal: Principal,
+  sourceStorageObjectIds: NonNullable<ImportJob["sourceStorageObjectIds"]>,
+  now = new Date(),
+  options?: { objectStorage?: ObjectStorage }
+): Promise<ImportJob> {
+  const objectStorage = options?.objectStorage ?? getRuntimeObjectStorage();
+  const files: CsvBundle = {};
+  const sourceFiles: NonNullable<ImportJob["sourceFiles"]> = {};
+  for (const part of ["products", "suppliers", "bom", "materials"] as const) {
+    const id = sourceStorageObjectIds[part];
+    if (!id) continue;
+    const record = await store.getStorageObject(id);
+    if (!record || record.organisationId !== principal.organisationId || record.purpose !== "IMPORT_SOURCE") {
+      throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
+    }
+    const text = await loadStoredText({ store, objectStorage, organisationId: principal.organisationId, storageObjectId: id });
+    files[part] = text;
+    sourceFiles[part] = {
+      filename: basenameHint(record.originalFilename),
+      sizeBytes: record.sizeBytes ?? Buffer.byteLength(text, "utf8"),
+      storageObjectId: id,
+      mimeType: record.mimeType,
+    };
+  }
+  return createImportJob(store, principal, files, now, { objectStorage, sourceFiles });
+}
+
+export async function reprocessImportJob(
+  store: PersistencePort,
+  principal: Principal,
+  jobId: string,
+  now = new Date(),
+  options?: { objectStorage?: ObjectStorage }
+): Promise<ImportJob> {
+  const job = await store.getImportJob(jobId);
+  if (!job || job.organisationId !== principal.organisationId) {
+    throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
+  }
+  if (!job.sourceStorageObjectIds) {
+    throw new SourceError("VALIDATION", "This import has no stored source file to reprocess.", 400);
+  }
+  const objectStorage = options?.objectStorage ?? getRuntimeObjectStorage();
+  const files = await loadImportBundle(store, principal.organisationId, job.sourceStorageObjectIds, objectStorage);
+  return runImportJob(store, principal, job.id, files, now, { objectStorage });
+}
+
+async function loadImportBundle(
+  store: PersistencePort,
+  organisationId: string,
+  ids: NonNullable<ImportJob["sourceStorageObjectIds"]>,
+  objectStorage: ObjectStorage
+): Promise<CsvBundle> {
+  const files: CsvBundle = {};
+  for (const part of ["products", "suppliers", "bom", "materials"] as const) {
+    const id = ids[part];
+    if (!id) continue;
+    files[part] = await loadStoredText({ store, objectStorage, organisationId, storageObjectId: id });
+  }
+  return files;
 }
 
 export async function runImportJob(
   store: PersistencePort,
   principal: Principal,
   jobId: string,
-  files: CsvBundle,
-  now = new Date()
+  files?: CsvBundle,
+  now = new Date(),
+  options?: { objectStorage?: ObjectStorage }
 ): Promise<ImportJob> {
   const job = await store.getImportJob(jobId);
   if (!job || job.organisationId !== principal.organisationId) {
     throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
   }
-  const productsFile = files.products ? parseCsv(files.products) : { headers: [], rows: [] };
-  const suppliersFile = files.suppliers ? parseCsv(files.suppliers) : { headers: [], rows: [] };
-  const bomFile = files.bom ? parseCsv(files.bom) : { headers: [], rows: [] };
-  const materialsFile = files.materials ? parseCsv(files.materials) : { headers: [], rows: [] };
+  const objectStorage = options?.objectStorage ?? getRuntimeObjectStorage();
+  const bundle =
+    files ??
+    (job.sourceStorageObjectIds
+      ? await loadImportBundle(store, principal.organisationId, job.sourceStorageObjectIds, objectStorage)
+      : {});
+  await emit(store, job, "IMPORT_FILE_PROCESSING_STARTED", { jobId: job.id }, now);
+  const productsFile = bundle.products ? parseCsv(bundle.products) : { headers: [], rows: [] };
+  const suppliersFile = bundle.suppliers ? parseCsv(bundle.suppliers) : { headers: [], rows: [] };
+  const bomFile = bundle.bom ? parseCsv(bundle.bom) : { headers: [], rows: [] };
+  const materialsFile = bundle.materials ? parseCsv(bundle.materials) : { headers: [], rows: [] };
   const productMapping = job.mapping?.["external_product_id"] || job.mapping?.["product_id"] ? job.mapping : proposeMapping(productsFile.headers);
   const supplierMapping = proposeMapping(suppliersFile.headers);
   const bomMapping = proposeMapping(bomFile.headers);

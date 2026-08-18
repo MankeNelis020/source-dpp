@@ -74,3 +74,44 @@ export function usePortalCommand(token: string) {
 }
 
 export { api };
+
+export async function uploadSourceFile(args: {
+  purpose: "IMPORT_SOURCE" | "EVIDENCE";
+  file: File;
+  caseId?: string;
+  requirementId?: string;
+  portalToken?: string;
+  onProgress?: (stage: "intent" | "upload" | "finalize") => void;
+}): Promise<{ id: string; sha256?: string; sizeBytes?: number; evidenceId?: string; availability: string }> {
+  const base = args.portalToken
+    ? `/api/portal/${encodeURIComponent(args.portalToken)}/uploads`
+    : "/api/uploads";
+  args.onProgress?.("intent");
+  const intent = await api<{ id: string }>(`${base}/intents`, {
+    method: "POST",
+    body: JSON.stringify({
+      purpose: args.purpose,
+      filename: args.file.name,
+      mimeType: args.file.type,
+      size: args.file.size,
+      caseId: args.caseId,
+      requirementId: args.requirementId,
+    }),
+  });
+  args.onProgress?.("upload");
+  const form = new FormData();
+  form.append("file", args.file);
+  const uploaded = await fetch(`${base}/${encodeURIComponent(intent.id)}`, {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+  const uploadedBody = await uploaded.json().catch(() => ({}));
+  if (!uploaded.ok) {
+    throw Object.assign(new Error(uploadedBody.message ?? "We couldn't store this file. Nothing has been added yet."), {
+      code: uploadedBody.error,
+    });
+  }
+  args.onProgress?.("finalize");
+  return api(`${base}/${encodeURIComponent(intent.id)}/finalize`, { method: "POST", body: "{}" });
+}

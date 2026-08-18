@@ -362,6 +362,7 @@ describe("auth environment fail-closed", () => {
         SOURCE_APP_DATABASE_URL: "postgres://source_app:not-a-real-secret@localhost:5432/postgres",
         SOURCE_SESSION_SECRET: "test-session-secret",
         SOURCE_OPAQUE_REF_SECRET: "test-opaque-secret",
+        SUPABASE_SERVICE_ROLE_KEY: "test-service-role-not-a-secret",
         SOURCE_IDENTITY_PROVIDER: "test",
       })
     ).toThrow(SourceEnvironmentError);

@@ -50,6 +50,11 @@ export function trustMeets(actual: TrustLevel | undefined, required: TrustLevel)
   return TRUST_RANK[actual] >= TRUST_RANK[required];
 }
 
+function evidenceIsAvailable(evidence?: EvidenceRecord): boolean {
+  if (!evidence) return false;
+  return !evidence.availability || evidence.availability === "AVAILABLE";
+}
+
 function resolvePermissionDecision(input: ReadinessInput): PermissionDecision {
   if (input.permissionDecision) return input.permissionDecision;
   const stored = input.permission ?? input.permissionContext?.storedState ?? "UNKNOWN";
@@ -72,7 +77,7 @@ function resolvePermissionDecision(input: ReadinessInput): PermissionDecision {
 export function evaluateReadiness(input: ReadinessInput): ReadinessReport {
   const identityPass = input.identity.matched && !input.identity.ambiguous && input.identity.confidence >= input.identity.autoLinkThreshold;
   const valuePass = input.valuePresent;
-  const evidencePresent = Boolean(input.evidence) && !input.evidence?.expired;
+  const evidencePresent = Boolean(input.evidence) && !input.evidence?.expired && evidenceIsAvailable(input.evidence);
   const evidencePass = input.evidenceRequired ? evidencePresent : true;
   const scopePass = !input.evidence || input.scopeMatch;
   const validityPass = !input.evidence || (!input.evidence.expired && Boolean(input.evidence.validUntil));
