@@ -1,17 +1,50 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { applyCommand, emptyState } from "@/domain/source/engine";
 import { evaluatePilotRun, recordRequirementOutcome } from "@/domain/source/analytics";
 import { resolveSubjectIdentity, isGtinValid } from "@/domain/source/subject-identity";
+import { resolveIdentity } from "@/domain/source/identity";
 import { planResolution, gatherPlannerInput } from "@/domain/source/planner";
 import { evaluatePropagationCandidate, propagateReadyClaim } from "@/domain/source/propagation";
 import { proposeMapping, createImportJob, parseCsv } from "@/server/source/import/service";
 import { MemoryPersistence } from "@/infrastructure/database/memory";
 import { resolveUserPrincipal } from "@/server/source/commands/dispatch";
 import { executeResolutionRun } from "@/server/source/resolution-run";
+import { ROLE_CAPABILITIES } from "@/server/source/authorization";
 import { PILOT_DATASET_ID } from "@/domain/source/pilot-dataset";
 import type { InformationRequirement, PilotRun } from "@/domain/source/types";
 
 const NOW = new Date("2026-08-18T09:00:00.000Z");
+const FIXTURES = join(process.cwd(), "fixtures/p1-manufacturer");
+
+function manufacturerFiles() {
+  return {
+    products: readFileSync(join(FIXTURES, "artikelstamm.csv"), "utf8"),
+    suppliers: readFileSync(join(FIXTURES, "lieferanten.csv"), "utf8"),
+    bom: readFileSync(join(FIXTURES, "stueckliste.csv"), "utf8"),
+    materials: readFileSync(join(FIXTURES, "materialien.csv"), "utf8"),
+  };
+}
+
+async function emptyManufacturerPrincipal(store: MemoryPersistence) {
+  const orgId = "holzwerk";
+  store.organisations.set(orgId, { id: orgId, name: "Holzwerk Schmidt GmbH", slug: "holzwerk" });
+  store.users.set("user-holzwerk", {
+    id: "user-holzwerk",
+    email: "owner@holzwerk.example",
+    displayName: "Schmidt",
+  });
+  store.memberships.push({
+    id: "mem-holzwerk",
+    userId: "user-holzwerk",
+    organisationId: orgId,
+    role: "OWNER",
+    capabilities: [...ROLE_CAPABILITIES.OWNER],
+  });
+  store.saveEngine(orgId, emptyState({ id: orgId, name: "Holzwerk Schmidt GmbH" }));
+  return resolveUserPrincipal(store, "user-holzwerk", orgId);
+}
 
 function req(partial: Partial<InformationRequirement> = {}): InformationRequirement {
   return {
@@ -41,6 +74,16 @@ describe("import mapping and messy input", () => {
     expect(mapping["EAN Code"]).toBe("product.gtin");
     expect(mapping["Art. nr."]).toBe("product.sku");
     expect(mapping.Mystery).toBe("unknown.Mystery");
+  });
+
+  it("maps messy German manufacturer headers including umlauts", () => {
+    const mapping = proposeMapping(["Artikelnummer", "Benennung", "Hersteller", "Hersteller-Art.Nr.", "Stückliste", "Lieferant-Nr.", "USt-IdNr."]);
+    expect(mapping.Artikelnummer).toBe("product.external_id");
+    expect(mapping.Benennung).toBe("product.name");
+    expect(mapping.Hersteller).toBe("product.manufacturer");
+    expect(mapping["Hersteller-Art.Nr."]).toBe("product.mpn");
+    expect(mapping["Lieferant-Nr."]).toBe("supplier.external_id");
+    expect(mapping["USt-IdNr."]).toBe("supplier.vat");
   });
 
   it("parses semicolon CSV and decimal commas without inventing values", () => {
@@ -109,6 +152,74 @@ describe("canonical subject identity", () => {
     });
     expect(hit.decision).toBe("AMBIGUOUS");
     expect(hit.autoLinkAllowed).toBe(false);
+  });
+
+  it("auto-links only exact MPN + manufacturer, not a name-only match", () => {
+    const state = emptyState();
+    state.subjects.push(
+      { id: "bosch", kind: "COMPONENT", name: "Alurahmen 881", createdAt: NOW.toISOString(), source: "IMPORTED" },
+      { id: "siemens", kind: "COMPONENT", name: "Alurahmen 881", createdAt: NOW.toISOString(), source: "IMPORTED" },
+      { id: "frame", kind: "COMPONENT", name: "Frame", createdAt: NOW.toISOString(), source: "IMPORTED" }
+    );
+    state.subjectIdentifiers.push(
+      { id: "i1", canonicalSubjectId: "bosch", scheme: "MPN", value: "881-A" },
+      { id: "i2", canonicalSubjectId: "bosch", scheme: "MANUFACTURER", value: "Bosch" },
+      { id: "i3", canonicalSubjectId: "siemens", scheme: "MPN", value: "881-A" },
+      { id: "i4", canonicalSubjectId: "siemens", scheme: "MANUFACTURER", value: "Siemens" }
+    );
+    const matched = resolveSubjectIdentity({
+      query: { mpn: "881-A", manufacturer: "Bosch", kind: "COMPONENT" },
+      subjects: state.subjects,
+      identifiers: state.subjectIdentifiers,
+      mappings: [],
+      tenantId: "acme",
+    });
+    expect(matched.decision).toBe("MATCHED");
+    expect(matched.selected?.id).toBe("bosch");
+    expect(matched.autoLinkAllowed).toBe(true);
+
+    const otherMfr = resolveSubjectIdentity({
+      query: { mpn: "881-A", manufacturer: "Siemens", kind: "COMPONENT" },
+      subjects: state.subjects,
+      identifiers: state.subjectIdentifiers,
+      mappings: [],
+      tenantId: "acme",
+    });
+    expect(otherMfr.decision).toBe("MATCHED");
+    expect(otherMfr.selected?.id).toBe("siemens");
+
+    const missingMfr = resolveSubjectIdentity({
+      query: { mpn: "881-A", kind: "COMPONENT" },
+      subjects: state.subjects,
+      identifiers: state.subjectIdentifiers,
+      mappings: [],
+      tenantId: "acme",
+    });
+    expect(missingMfr.decision).toBe("AMBIGUOUS");
+    expect(missingMfr.autoLinkAllowed).toBe(false);
+
+    const nameOnly = resolveSubjectIdentity({
+      query: { name: "Frame", kind: "COMPONENT" },
+      subjects: state.subjects,
+      identifiers: state.subjectIdentifiers,
+      mappings: [],
+      tenantId: "acme",
+    });
+    expect(nameOnly.decision).toBe("PROBABLE_MATCH");
+    expect(nameOnly.autoLinkAllowed).toBe(false);
+  });
+
+  it("auto-links suppliers on VAT, not on a similar name", () => {
+    const actors = [
+      { id: "bosch", name: "Bosch", legalName: "Robert Bosch GmbH", kind: "organisation" as const, vat: "DE811193878", country: "DE" },
+      { id: "mueller", name: "Stoffwerke Müller", legalName: "Stoffwerke Mueller GmbH", kind: "organisation" as const, country: "DE" },
+    ];
+    const vat = resolveIdentity({ vat: "DE811193878" }, actors, 95);
+    expect(vat.status).toBe("IDENTITY_MATCHED");
+    expect(vat.autoLinkAllowed).toBe(true);
+    const alias = resolveIdentity({ name: "Stoffwerke Müller GmbH", country: "DE" }, actors, 95);
+    expect(alias.autoLinkAllowed).toBe(false);
+    expect(["IDENTITY_PROBABLE", "IDENTITY_AMBIGUOUS"]).toContain(alias.status);
   });
 
   it("records human merge provenance and rewrites requirements onto the canonical subject", () => {
@@ -344,10 +455,15 @@ describe("resolution run uses the planner without inventing counts", () => {
     const run = afterImport.pilotRuns[afterImport.pilotRuns.length - 1];
     expect(run.baseline.missingRequirementIds.length).toBe(run.baseline.missing);
     const requestsBefore = afterImport.requests.length;
-    await executeResolutionRun(store, principal, NOW);
+    const first = await executeResolutionRun(store, principal, NOW);
     const afterRun = store.loadEngine("acme");
-    expect(afterRun.pilotRuns[0].completedAt).toBeTruthy();
+    expect(afterRun.pilotRuns[0].completedAt).toBeFalsy();
+    expect(afterRun.pilotRuns[0].executionStartedAt).toBeTruthy();
     expect(afterRun.requests.length).toBeGreaterThanOrEqual(requestsBefore);
+    const second = await executeResolutionRun(store, principal, NOW);
+    expect(second.alreadyExecuted).toBe(true);
+    expect(store.loadEngine("acme").requests.length).toBe(afterRun.requests.length);
+    expect(first.alreadyExecuted).toBe(false);
   });
 });
 
@@ -389,5 +505,51 @@ describe("planner gather", () => {
       })
     );
     expect(plan.strategy).toBe("exact_trusted_claim");
+  });
+});
+
+describe("first manufacturer file is the measurement gate", () => {
+  it("imports a real manufacturer CSV set on an empty tenant without outreach, then executes once", async () => {
+    const store = new MemoryPersistence();
+    const principal = await emptyManufacturerPrincipal(store);
+    const job = await createImportJob(store, principal, manufacturerFiles(), NOW);
+    expect(job.summary?.outreachStarted).toBe(false);
+
+    const afterImport = store.loadEngine("holzwerk");
+    expect(afterImport.requests).toHaveLength(0);
+    expect(afterImport.pilotRuns).toHaveLength(1);
+    expect(afterImport.pilotRuns[0].baseline.missing).toBeGreaterThan(0);
+    expect(afterImport.pilotRuns[0].baseline.missingRequirementIds.length).toBe(afterImport.pilotRuns[0].baseline.missing);
+    expect(afterImport.pilotRuns[0].completedAt).toBeUndefined();
+
+    const bosch = afterImport.subjects.filter((s) =>
+      afterImport.subjectIdentifiers.some((i) => i.canonicalSubjectId === s.id && i.scheme === "MPN" && i.value === "881-A")
+    );
+    expect(bosch.length).toBeGreaterThanOrEqual(2);
+    const manufacturers = new Set(
+      afterImport.subjectIdentifiers
+        .filter((i) => i.scheme === "MANUFACTURER" && bosch.some((s) => s.id === i.canonicalSubjectId))
+        .map((i) => i.value)
+    );
+    expect(manufacturers.has("Bosch")).toBe(true);
+    expect(manufacturers.has("Siemens")).toBe(true);
+
+    const muellerActors = afterImport.actors.filter((a) => /müller|mueller/i.test(a.name) || /müller|mueller/i.test(a.legalName));
+    expect(muellerActors.length).toBeGreaterThanOrEqual(2);
+    expect(afterImport.tasks.some((t) => t.kind === "identity")).toBe(true);
+
+    const first = await executeResolutionRun(store, principal, NOW);
+    const afterExecute = store.loadEngine("holzwerk");
+    expect(first.alreadyExecuted).toBe(false);
+    expect(afterExecute.requests.length).toBeGreaterThan(0);
+    expect(afterExecute.pilotRuns[0].executionStartedAt).toBeTruthy();
+    expect(afterExecute.pilotRuns[0].completedAt).toBeUndefined();
+
+    const evaluation = evaluatePilotRun(afterExecute, afterExecute.pilotRuns[0]);
+    expect(evaluation.initialMissing).toBe(afterExecute.pilotRuns[0].baseline.missing);
+
+    const second = await executeResolutionRun(store, principal, NOW);
+    expect(second.alreadyExecuted).toBe(true);
+    expect(store.loadEngine("holzwerk").requests.length).toBe(afterExecute.requests.length);
   });
 });

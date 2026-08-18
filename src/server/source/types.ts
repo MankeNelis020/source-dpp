@@ -217,6 +217,8 @@ export interface ImportJob {
     reviewRows?: number;
     warningRows?: number;
     errorRows?: number;
+    outreachStarted?: boolean;
+    identityReviews?: number;
   };
 }
 

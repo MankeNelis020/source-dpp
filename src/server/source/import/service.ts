@@ -119,37 +119,79 @@ export const COLUMN_ALIASES: Record<string, string> = {
   supplier_id: "supplier.external_id",
   supplierid: "supplier.external_id",
   external_supplier_id: "supplier.external_id",
+  lieferant: "supplier.name",
+  lieferantenname: "supplier.name",
+  leverancier: "supplier.name",
+  lieferant_nr: "supplier.external_id",
+  lieferanten_nr: "supplier.external_id",
+  lieferantennr: "supplier.external_id",
   ean: "product.gtin",
   ean_code: "product.gtin",
+  ean13: "product.gtin",
   gtin: "product.gtin",
   article: "product.sku",
   art_nr: "product.sku",
+  artikelnummer: "product.external_id",
+  artikel_nr: "product.external_id",
   sku: "product.sku",
   name: "product.name",
+  benennung: "product.name",
+  bezeichnung: "product.name",
   product_id: "product.external_id",
   external_product_id: "product.external_id",
   manufacturer: "product.manufacturer",
+  hersteller: "product.manufacturer",
+  fabrikant: "product.manufacturer",
   manufacturer_part_number: "product.mpn",
+  hersteller_art_nr: "product.mpn",
+  herstellernummer: "product.mpn",
   legal_name: "supplier.legal_name",
+  rechtsform: "supplier.legal_name",
   vat: "supplier.vat",
+  ust_idnr: "supplier.vat",
+  ust_id: "supplier.vat",
+  btw: "supplier.vat",
   country: "supplier.country",
+  land: "supplier.country",
   domain: "supplier.domain",
   email: "supplier.email",
+  e_mail: "supplier.email",
   component_id: "bom.component_id",
   component_name: "bom.component_name",
+  bauteil_nr: "bom.component_id",
+  bauteil: "bom.component_name",
+  komponente: "bom.component_name",
   quantity: "bom.quantity",
+  menge: "bom.quantity",
+  hoeveelheid: "bom.quantity",
   unit: "bom.unit",
+  einheit: "bom.unit",
   material_name: "material.name",
   material_code: "material.code",
   material_grade: "material.grade",
+  werkstoff: "material.name",
+  werkstoff_nr: "material.code",
+  anteil: "material.percentage",
   percentage: "material.percentage",
   country_of_origin: "material.origin",
 };
 
+export function headerAliasKey(header: string): string {
+  return header
+    .trim()
+    .toLowerCase()
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "");
+}
+
 export function proposeMapping(headers: string[]): Record<string, string> {
   const mapping: Record<string, string> = {};
   for (const header of headers) {
-    const key = header.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    const key = headerAliasKey(header);
     mapping[header] = COLUMN_ALIASES[key] ?? COLUMN_ALIASES[header.toLowerCase()] ?? `unknown.${header}`;
   }
   return mapping;
@@ -310,20 +352,29 @@ export async function runImportJob(
   }
 
   const state = hydrateEngineState(await store.loadEngine(principal.organisationId));
-  const supplierIds = ingestSuppliers(state, acceptedSuppliers, principal, now);
+  const requestIdsBefore = new Set(state.requests.map((r) => r.id));
+  const identityReviews: IdentityReviewDraft[] = [];
+  const supplierIds = ingestSuppliers(state, acceptedSuppliers, principal, now, identityReviews);
   const productIds = ingestSubjects(state, acceptedProducts, "PRODUCT", principal, now, {
-    nameKeys: ["product.name", "product.sku"],
+    nameKeys: ["product.name", "product.sku", "product.external_id"],
     externalKeys: ["product.external_id", "product.sku"],
     gtinKey: "product.gtin",
     mpnKey: "product.mpn",
     skuKey: "product.sku",
     manufacturerKey: "product.manufacturer",
+    identityReviews,
   });
-  const componentIds = ingestBom(state, acceptedBom, productIds, supplierIds, principal, now);
+  const componentIds = ingestBom(state, acceptedBom, productIds, supplierIds, principal, now, identityReviews);
   ingestMaterials(state, acceptedMaterials, productIds, componentIds, principal, now);
 
   const generated = generatePilotRequirements(state, principal, now);
+  attachIdentityReviews(state, identityReviews, now);
   await emit(store, job, "entity.matched", { count: generated, entity: "requirements" }, now);
+
+  const leakedRequests = state.requests.filter((r) => !requestIdsBefore.has(r.id));
+  if (leakedRequests.length > 0) {
+    throw new SourceError("CONFLICT", "Import started outreach. Plan-only import must not send supplier requests.", 500);
+  }
 
   const snapshot = capturePilotSnapshot(state, now);
   state.pilotRuns.push({
@@ -347,7 +398,9 @@ export async function runImportJob(
     materials: acceptedMaterials.length,
     requirements: generated,
     autoResolvable: planned,
-    needsAttention: job.reviewCount + job.errorCount,
+    needsAttention: job.reviewCount + job.errorCount + identityReviews.length,
+    outreachStarted: false,
+    identityReviews: identityReviews.length,
     autoMapped: rawRecords.filter((r) => r.status === "accepted").length,
     reviewRows: job.reviewCount,
     warningRows: job.warningCount,
@@ -365,6 +418,13 @@ export async function runImportJob(
   return job;
 }
 
+interface IdentityReviewDraft {
+  kind: "supplier" | "subject";
+  createdId: string;
+  candidateIds: string[];
+  reason: string;
+}
+
 function apply(state: EngineState, command: Parameters<typeof applyCommand>[1], now: Date) {
   const result = applyCommand(state, command, now);
   Object.assign(state, result.state);
@@ -375,13 +435,19 @@ function ingestSuppliers(
   state: EngineState,
   records: RawImportRecord[],
   principal: Principal,
-  now: Date
+  now: Date,
+  identityReviews: IdentityReviewDraft[]
 ) {
   const ids = new Map<string, string>();
   for (const record of records) {
     const row = record.normalized;
     const name = mapped(row, "supplier.name", "supplier.legal_name", "supplier.external_id");
     const external = mapped(row, "supplier.external_id") || name.toLowerCase().replace(/\s+/g, "-");
+    const existingByExternal = state.actors.find((a) => a.id === external);
+    if (existingByExternal) {
+      ids.set(external, existingByExternal.id);
+      continue;
+    }
     const identity = resolveIdentity(
       {
         name,
@@ -392,12 +458,8 @@ function ingestSuppliers(
       state.actors,
       state.tenant.identityAutoLinkThreshold
     );
-    if (identity.autoLinkAllowed && identity.selected) {
+    if (identity.autoLinkAllowed && identity.selected && identity.status === "IDENTITY_MATCHED") {
       ids.set(external, identity.selected.id);
-      continue;
-    }
-    if (identity.status === "IDENTITY_AMBIGUOUS" || identity.status === "IDENTITY_PROBABLE") {
-      ids.set(external, identity.candidates[0]?.actor.id ?? external);
       continue;
     }
     const actorId = external;
@@ -423,6 +485,17 @@ function ingestSuppliers(
         });
       }
     }
+    if (identity.status === "IDENTITY_AMBIGUOUS" || identity.status === "IDENTITY_PROBABLE") {
+      identityReviews.push({
+        kind: "supplier",
+        createdId: actorId,
+        candidateIds: identity.candidates.map((c) => c.actor.id),
+        reason:
+          identity.status === "IDENTITY_AMBIGUOUS"
+            ? "More than one probable supplier match. Do not merge automatically."
+            : "Probable supplier match. Confirm before treating them as the same organisation.",
+      });
+    }
     ids.set(external, actorId);
   }
   void principal;
@@ -436,7 +509,15 @@ function ingestSubjects(
   kind: SubjectKind,
   principal: Principal,
   now: Date,
-  keys: { nameKeys: string[]; externalKeys: string[]; gtinKey?: string; mpnKey?: string; skuKey?: string; manufacturerKey?: string }
+  keys: {
+    nameKeys: string[];
+    externalKeys: string[];
+    gtinKey?: string;
+    mpnKey?: string;
+    skuKey?: string;
+    manufacturerKey?: string;
+    identityReviews: IdentityReviewDraft[];
+  }
 ) {
   const ids = new Map<string, string>();
   for (const record of records) {
@@ -444,14 +525,17 @@ function ingestSubjects(
     const name = mapped(row, ...keys.nameKeys);
     const external = mapped(row, ...keys.externalKeys) || name.toLowerCase().replace(/\s+/g, "-");
     const gtin = keys.gtinKey ? mapped(row, keys.gtinKey) : "";
+    const mpn = keys.mpnKey ? mapped(row, keys.mpnKey) : "";
+    const sku = keys.skuKey ? mapped(row, keys.skuKey) : "";
+    const manufacturer = keys.manufacturerKey ? mapped(row, keys.manufacturerKey) : "";
     const resolution = resolveSubjectIdentity({
       query: {
         name,
         kind,
         gtin: gtin || undefined,
-        mpn: keys.mpnKey ? mapped(row, keys.mpnKey) || undefined : undefined,
-        manufacturer: keys.manufacturerKey ? mapped(row, keys.manufacturerKey) || undefined : undefined,
-        sku: keys.skuKey ? mapped(row, keys.skuKey) || undefined : undefined,
+        mpn: mpn || undefined,
+        manufacturer: manufacturer || undefined,
+        sku: sku || undefined,
         sourceSystem: "import",
         sourceRecordId: external,
       },
@@ -460,7 +544,7 @@ function ingestSubjects(
       mappings: state.tenantSubjectMappings,
       tenantId: state.tenant.id,
     });
-    if (resolution.autoLinkAllowed && resolution.selected) {
+    if (resolution.autoLinkAllowed && resolution.selected && resolution.decision === "MATCHED") {
       ids.set(external, resolution.selected.id);
       continue;
     }
@@ -477,14 +561,27 @@ function ingestSubjects(
         sourceReference: `${record.sourceFile}:${record.row}`,
         identifiers: [
           gtin ? { scheme: "GTIN" as const, value: gtin } : undefined,
-          keys.skuKey && mapped(row, keys.skuKey) ? { scheme: "SKU" as const, value: mapped(row, keys.skuKey) } : undefined,
-          keys.mpnKey && mapped(row, keys.mpnKey) ? { scheme: "MPN" as const, value: mapped(row, keys.mpnKey) } : undefined,
-        ].filter(Boolean) as { scheme: "GTIN" | "SKU" | "MPN"; value: string }[],
+          sku ? { scheme: "SKU" as const, value: sku } : undefined,
+          mpn ? { scheme: "MPN" as const, value: mpn } : undefined,
+          manufacturer ? { scheme: "MANUFACTURER" as const, value: manufacturer } : undefined,
+        ].filter(Boolean) as { scheme: "GTIN" | "SKU" | "MPN" | "MANUFACTURER"; value: string }[],
       },
       now
     );
     const created = state.tenantSubjectMappings.find((m) => m.sourceRecordId === external);
-    ids.set(external, created?.canonicalSubjectId ?? state.subjects[state.subjects.length - 1]?.id);
+    const createdId = created?.canonicalSubjectId ?? state.subjects[state.subjects.length - 1]?.id;
+    ids.set(external, createdId);
+    if (resolution.decision === "AMBIGUOUS" || resolution.decision === "PROBABLE_MATCH") {
+      keys.identityReviews.push({
+        kind: "subject",
+        createdId,
+        candidateIds: resolution.candidates.map((c) => c.subject.id),
+        reason:
+          resolution.decision === "AMBIGUOUS"
+            ? resolution.candidates[0]?.reason ?? "Ambiguous subject identity. Do not merge automatically."
+            : "Probable subject match. Confirm before treating them as the same part.",
+      });
+    }
   }
   return ids;
 }
@@ -495,16 +592,36 @@ function ingestBom(
   productIds: Map<string, string>,
   supplierIds: Map<string, string>,
   principal: Principal,
-  now: Date
+  now: Date,
+  identityReviews: IdentityReviewDraft[]
 ) {
   const componentIds = new Map<string, string>();
   for (const record of records) {
     const row = record.normalized;
-    const productExternal = mapped(row, "product.external_id") || mapped(row, "raw.product_id");
+    const productExternal =
+      mapped(row, "product.external_id", "product.sku") || mapped(row, "raw.product_id", "raw.Artikelnummer", "raw.artikelnummer");
     const parentId = productIds.get(productExternal) ?? state.subjects.find((s) => s.id === productExternal)?.id;
-    const componentExternal = mapped(row, "bom.component_id") || mapped(row, "raw.component_id");
+    const componentExternal = mapped(row, "bom.component_id") || mapped(row, "raw.component_id", "raw.Bauteil-Nr.", "raw.Bauteil-Nr");
     const componentName = mapped(row, "bom.component_name") || componentExternal;
     if (!componentName) continue;
+    const mpn = mapped(row, "product.mpn") || mapped(row, "raw.manufacturer_part_number", "raw.Hersteller-Art.Nr.");
+    const manufacturer = mapped(row, "product.manufacturer");
+    const supplierId =
+      supplierIds.get(mapped(row, "supplier.external_id")) || mapped(row, "supplier.external_id") || undefined;
+    const existing = resolveSubjectIdentity({
+      query: {
+        name: componentName,
+        kind: "COMPONENT",
+        mpn: mpn || undefined,
+        manufacturer: manufacturer || undefined,
+        sourceSystem: "import",
+        sourceRecordId: componentExternal || componentName.toLowerCase().replace(/\s+/g, "-"),
+      },
+      subjects: state.subjects,
+      identifiers: state.subjectIdentifiers,
+      mappings: state.tenantSubjectMappings,
+      tenantId: state.tenant.id,
+    });
     apply(
       state,
       {
@@ -512,7 +629,7 @@ function ingestBom(
         kind: "COMPONENT",
         name: componentName,
         parentSubjectId: parentId,
-        supplierId: supplierIds.get(mapped(row, "supplier.external_id")) || mapped(row, "supplier.external_id") || undefined,
+        supplierId,
         quantity: parseDecimal(mapped(row, "bom.quantity")),
         unit: mapped(row, "bom.unit") || undefined,
         source: "IMPORTED",
@@ -521,11 +638,10 @@ function ingestBom(
         externalId: componentExternal || componentName.toLowerCase().replace(/\s+/g, "-"),
         sourceReference: `${record.sourceFile}:${record.row}`,
         relationshipKind: "contains",
-        identifiers: mapped(row, "product.mpn")
-          ? [{ scheme: "MPN", value: mapped(row, "product.mpn") }]
-          : mapped(row, "raw.manufacturer_part_number")
-            ? [{ scheme: "MPN", value: mapped(row, "raw.manufacturer_part_number") }]
-            : [],
+        identifiers: [
+          mpn ? { scheme: "MPN" as const, value: mpn } : undefined,
+          manufacturer ? { scheme: "MANUFACTURER" as const, value: manufacturer } : undefined,
+        ].filter(Boolean) as { scheme: "MPN" | "MANUFACTURER"; value: string }[],
       },
       now
     );
@@ -533,6 +649,14 @@ function ingestBom(
       (m) => m.sourceRecordId === (componentExternal || componentName.toLowerCase().replace(/\s+/g, "-"))
     )?.canonicalSubjectId;
     if (id) componentIds.set(componentExternal || componentName, id);
+    if (existing.decision === "AMBIGUOUS" || existing.decision === "PROBABLE_MATCH") {
+      identityReviews.push({
+        kind: "subject",
+        createdId: id ?? componentExternal,
+        candidateIds: existing.candidates.map((c) => c.subject.id),
+        reason: existing.candidates[0]?.reason ?? "Ambiguous component identity. Do not merge automatically.",
+      });
+    }
   }
   return componentIds;
 }
@@ -574,6 +698,13 @@ function ingestMaterials(
   }
 }
 
+function supplierForSubject(state: EngineState, subjectId: string): string | undefined {
+  const asChild = state.subjectRelationships.find((r) => r.childSubjectId === subjectId && r.supplierActorId);
+  if (asChild?.supplierActorId) return asChild.supplierActorId;
+  const asParent = state.subjectRelationships.find((r) => r.parentSubjectId === subjectId && r.supplierActorId);
+  return asParent?.supplierActorId;
+}
+
 function generatePilotRequirements(state: EngineState, principal: Principal, now: Date) {
   let generated = 0;
   for (const subject of state.subjects) {
@@ -593,7 +724,12 @@ function generatePilotRequirements(state: EngineState, principal: Principal, now
       });
       apply(
         state,
-        { type: "OPEN_REQUIREMENT", requirement, planOnly: true },
+        {
+          type: "OPEN_REQUIREMENT",
+          requirement,
+          declaredSupplierId: supplierForSubject(state, subject.id),
+          planOnly: true,
+        },
         now
       );
       generated += 1;
@@ -601,6 +737,33 @@ function generatePilotRequirements(state: EngineState, principal: Principal, now
   }
   void principal;
   return generated;
+}
+
+function attachIdentityReviews(state: EngineState, reviews: IdentityReviewDraft[], now: Date) {
+  for (const review of reviews) {
+    const relatedCase =
+      state.cases.find((c) => c.supplierId === review.createdId || c.currentActorId === review.createdId) ??
+      state.cases.find((c) => {
+        const requirement = state.requirements.find((r) => r.id === c.requirementId);
+        return requirement?.subjectId === review.createdId;
+      });
+    const caseId = relatedCase?.id ?? `identity-${review.createdId}`;
+    if (state.tasks.some((t) => t.kind === "identity" && t.context === review.reason && t.caseId === caseId)) continue;
+    state.tasks.push({
+      id: `task-identity-${review.kind}-${review.createdId}`,
+      caseId,
+      title:
+        review.kind === "supplier"
+          ? "Confirm whether these suppliers are the same organisation."
+          : "Confirm whether these parts are the same subject.",
+      context: review.reason,
+      recommendedAction: "Prefer an extra review item over an automatic merge. Only MATCHED identity may propagate.",
+      ownerLabel: "Identity reviewer",
+      status: "open",
+      createdAt: now.toISOString(),
+      kind: "identity",
+    });
+  }
 }
 
 export async function getImportProgress(store: PersistencePort, principal: Principal, jobId: string) {

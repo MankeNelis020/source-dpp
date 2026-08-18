@@ -524,6 +524,7 @@ export interface SubjectRelationship {
   kind?: SubjectRelationKind;
   quantity?: number;
   unit?: string;
+  supplierActorId?: string;
   source: AssignmentSource;
   createdBy?: string;
   createdAt: string;
@@ -533,7 +534,7 @@ export interface SubjectRelationship {
 export interface SubjectIdentifier {
   id: string;
   canonicalSubjectId: string;
-  scheme: "GTIN" | "MPN" | "SKU" | "INTERNAL" | "SUPPLIER_PID" | "VAT" | "LEI" | "EORI";
+  scheme: "GTIN" | "MPN" | "SKU" | "INTERNAL" | "SUPPLIER_PID" | "VAT" | "LEI" | "EORI" | "MANUFACTURER";
   value: string;
 }
 
@@ -650,6 +651,7 @@ export interface PilotRun {
   datasetVersion: string;
   importJobId?: string;
   startedAt: string;
+  executionStartedAt?: string;
   completedAt?: string;
   baseline: PilotSnapshot;
   final?: PilotSnapshot;

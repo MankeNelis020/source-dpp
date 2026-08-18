@@ -46,6 +46,15 @@ function gtinValid(value: string) {
   return d.length === 8 || d.length === 12 || d.length === 13 || d.length === 14;
 }
 
+function manufacturerOf(subjectId: string, identifiers: SubjectIdentifier[]): string | undefined {
+  return identifiers.find((row) => row.canonicalSubjectId === subjectId && row.scheme === "MANUFACTURER")?.value;
+}
+
+function sameManufacturer(a?: string, b?: string) {
+  if (!a || !b) return false;
+  return normalizePersonOrOrgName(a) === normalizePersonOrOrgName(b);
+}
+
 export function resolveSubjectIdentity(args: {
   query: SubjectIdentityQuery;
   subjects: CanonicalSubject[];
@@ -91,13 +100,13 @@ export function resolveSubjectIdentity(args: {
     if (!subject) return;
     if (query.kind && subject.kind !== query.kind) return;
     if (candidates.some((c) => c.subject.id === subject.id)) return;
-    const decision: SubjectMatchDecision = method === "probabilistic" ? "PROBABLE_MATCH" : "MATCHED";
+    const decision: SubjectMatchDecision = method === "deterministic" ? "MATCHED" : "PROBABLE_MATCH";
     candidates.push({
       subject,
       decision,
       method,
       reason,
-      qualitative: method === "deterministic" ? "High confidence" : method === "normalized" ? "High confidence" : "Review suggested",
+      qualitative: method === "deterministic" ? "High confidence" : "Review suggested",
     });
   };
 
@@ -108,27 +117,18 @@ export function resolveSubjectIdentity(args: {
     }
   }
 
-  if (query.mpn && query.manufacturer) {
-    const mpn = normalizeToken(query.mpn);
-    const mfr = normalizePersonOrOrgName(query.manufacturer);
-    for (const ident of identifiers) {
-      if (ident.scheme !== "MPN" || normalizeToken(ident.value) !== mpn) continue;
-      const subject = byId.get(ident.canonicalSubjectId);
-      if (!subject) continue;
-      const manufacturerIdent = identifiers.find(
-        (row) => row.canonicalSubjectId === subject.id && row.scheme === "INTERNAL" && normalizePersonOrOrgName(row.value) === mfr
-      );
-      const nameHit = normalizePersonOrOrgName(subject.name).includes(mfr) || mfr.includes(normalizePersonOrOrgName(subject.name));
-      if (manufacturerIdent || nameHit || query.manufacturer === subject.name) {
-        push(subject.id, "deterministic", "Exact MPN + manufacturer");
-      }
-    }
-  } else if (query.mpn) {
+  if (query.mpn) {
     const mpn = normalizeToken(query.mpn);
     const matches = identifiers.filter((i) => i.scheme === "MPN" && normalizeToken(i.value) === mpn);
-    if (matches.length === 1) push(matches[0].canonicalSubjectId, "normalized", "Exact MPN");
-    if (matches.length > 1) {
-      for (const match of matches) push(match.canonicalSubjectId, "probabilistic", "Same MPN, manufacturer missing");
+    for (const match of matches) {
+      const existingMfr = manufacturerOf(match.canonicalSubjectId, identifiers);
+      if (query.manufacturer && sameManufacturer(query.manufacturer, existingMfr)) {
+        push(match.canonicalSubjectId, "deterministic", "Exact MPN + manufacturer");
+      } else if (query.manufacturer && existingMfr && !sameManufacturer(query.manufacturer, existingMfr)) {
+        push(match.canonicalSubjectId, "probabilistic", "Same MPN, different manufacturer");
+      } else {
+        push(match.canonicalSubjectId, "normalized", "MPN without complete manufacturer");
+      }
     }
   }
 
@@ -160,7 +160,8 @@ export function resolveSubjectIdentity(args: {
     }
   }
 
-  const matched = candidates.filter((c) => c.decision === "MATCHED");
+  const matched = candidates.filter((c) => c.decision === "MATCHED" && c.method === "deterministic");
+  const differentManufacturer = candidates.filter((c) => c.reason === "Same MPN, different manufacturer");
   const probable = candidates.filter((c) => c.decision === "PROBABLE_MATCH");
 
   if (matched.length === 1) {
@@ -172,10 +173,26 @@ export function resolveSubjectIdentity(args: {
       modelVersion: IDENTITY_ENGINE_VERSION,
     };
   }
-  if (matched.length > 1 || (probable.length > 1 && matched.length === 0)) {
+  if (matched.length > 1) {
     return {
       decision: "AMBIGUOUS",
-      candidates: matched.length ? matched : probable,
+      candidates: matched,
+      autoLinkAllowed: false,
+      modelVersion: IDENTITY_ENGINE_VERSION,
+    };
+  }
+  if (differentManufacturer.length > 0) {
+    return {
+      decision: "AMBIGUOUS",
+      candidates: differentManufacturer,
+      autoLinkAllowed: false,
+      modelVersion: IDENTITY_ENGINE_VERSION,
+    };
+  }
+  if (probable.length > 1) {
+    return {
+      decision: "AMBIGUOUS",
+      candidates: probable,
       autoLinkAllowed: false,
       modelVersion: IDENTITY_ENGINE_VERSION,
     };

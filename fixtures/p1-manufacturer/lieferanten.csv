@@ -1,0 +1,6 @@
+Lieferant-Nr.;Lieferant;Rechtsform;USt-IdNr.;Land;E-Mail
+L-100;Holzwerk Schmidt GmbH;Holzwerk Schmidt GmbH;DE129274100;DE;einkauf@schmidt.example
+L-200;Robert Bosch GmbH;Robert Bosch GmbH;DE811193878;DE;data@bosch.example
+L-300;Siemens AG;Siemens AG;DE129274202;DE;parts@siemens.example
+L-400;Stoffwerke Müller;Stoffwerke Mueller GmbH;;DE;info@mueller.example
+L-400b;Stoffwerke Müller GmbH;Stoffwerke Mueller;;DE;

@@ -77,7 +77,7 @@ P1 may start. Do not reopen P0 architecture unless real data exposes an invarian
 | No outcome attribution | High READY without knowing SOURCE created value | `RequirementOutcome.mechanism` |
 | No `SUPPLIER_CONTACT_AVOIDED` | North star unmeasurable | First-class event + row |
 | Cross-tenant reuse not in the loop | Network path unused | Planner preflight via `findReusableClaimsForRequirement` only |
-| Outreach during ingest | Import would email suppliers | Import is `planOnly`; CTA `executeResolutionRun` sends |
+| Outreach during ingest | Import would email suppliers | Import is `planOnly`; CTA `executeResolutionRun` sends. Import fails closed if any `SupplierRequest` is created. Execute is idempotent (`processed_commands` key `{org}:pilot:{runId}:EXECUTE:v1`). Double-click / restart does not send a second wave. `PilotRun.completedAt` is not set on the first CTA — only `executionStartedAt`. |
 | Request grouping | 82 emails for one answer | Grouped communication; one requirement remains independently resolvable |
 | Metrics from UI state | Business decision would be wrong | `evaluatePilotRun` from persisted events/outcomes |
 | Demo catalogue pages | User cannot inspect imported graph | Product / material / supplier projections from engine |
@@ -150,12 +150,14 @@ Existing `resolveIdentity` (heuristic-v0), plus staged labels:
 
 | Stage | Examples | Auto-link? |
 |---|---|---|
-| A Deterministic | Exact VAT, LEI, known tenant mapping | Yes |
-| B Normalized | Case fold, legal suffix, domain, whitespace | Yes if one candidate above threshold |
+| A Deterministic | Exact VAT, LEI, known tenant mapping / external supplier id | Yes |
+| B Normalized | Case fold, legal suffix, domain, whitespace | **No** — PROBABLE. Extra review items beat a wrong merge. |
 | C Heuristic | Similar legal name + country | No — PROBABLE / AMBIGUOUS |
 | D Human | Needs You | Only MATCHED after confirm |
 
 States used: `MATCHED` (`IDENTITY_MATCHED`), `PROBABLE_MATCH`, `AMBIGUOUS`, `NO_MATCH`, `REJECTED_MATCH`. `IDENTITY_SPLIT_REQUIRED` / `MERGE_REQUIRED` become real after merge/split commands.
+
+Import never binds a probable/ambiguous supplier to `candidates[0]`. It creates a distinct actor and an identity review task.
 
 Scores stay **uncalibrated**. UI shows qualitative bands, not fake probabilities.
 
@@ -163,14 +165,14 @@ Scores stay **uncalibrated**. UI shows qualitative bands, not fake probabilities
 
 New `resolveSubjectIdentity`:
 
-| Stage | Examples |
-|---|---|
-| A | Exact GTIN; exact validated MPN + manufacturer; existing tenant mapping; supplier product code |
-| B | Normalized name + kind; SKU case-fold |
-| C | Similar name + same manufacturer/supplier context |
-| D | “We think these are the same component.” Same / Different / Need more information |
+| Stage | Examples | Auto-link? |
+|---|---|---|
+| A | Exact GTIN; exact validated MPN **+ manufacturer**; existing tenant mapping; supplier product code | Yes — only these set `autoLinkAllowed` |
+| B | Normalized name + kind; SKU case-fold; MPN without manufacturer | No — PROBABLE |
+| C | Similar name; **same MPN + different manufacturer** | No — **AMBIGUOUS** |
+| D | “We think these are the same component.” Same / Different / Need more information | Human only |
 
-Only MATCHED enables automatic propagation. Ambiguous identity must not improve metrics by merging.
+Only MATCHED (deterministic) enables automatic propagation. Ambiguous identity must not improve metrics by merging. Prefer 200 extra review items over 20 wrong merges that inflate Contact Avoidance Rate.
 
 Unlock copy (“Confirming this could unlock 82 requirements across 37 products”) is computed from `productIds` on still-missing requirements for the candidate subjects.
 
@@ -211,21 +213,24 @@ Requirements are created because the **pilot dataset says this subject kind need
 ```
 baseline snapshot (immutable)
         ↓
-executeResolutionRun  (“Let SOURCE handle the gaps”)
+CTA “Let SOURCE handle the gaps” → executeResolutionRun
+        (idempotent: processed_commands `{org}:pilot:{runId}:EXECUTE:v1`)
         ↓
 for each unresolved requirement:
   gatherPlannerInput (state + network port)
   planResolution
   record selected route + reason
         ↓
-  if supplier_request: preflight
+  if supplier_request and no active request: preflight then SEND_REQUEST
         ↓
-  grouped outreach OR reuse/authorization/human_review/explained_unresolved
+grouped outreach OR reuse/authorization/human_review/explained_unresolved
         ↓
 claim.ready → propagateReadyClaim (same tenant)
         ↓
 findReusableClaimsForRequirement (cross-tenant, never copy claims)
 ```
+
+Import never starts this loop. `OPEN_REQUIREMENT planOnly` stops at DETECTED. `PilotRun.executionStartedAt` is the measurement clock for time-to-resolution; `completedAt` is not written on the first CTA.
 
 ### Planner order (v1, not universal)
 
@@ -288,7 +293,7 @@ final?: PilotSnapshot,
 cost?: CostTelemetry
 ```
 
-`PilotSnapshot` stores counts **and** the frozen `missingRequirementIds` cohort (the denominator).
+`PilotSnapshot` stores counts **and** the frozen `missingRequirementIds` cohort (the denominator). Time-to-resolution is measured from `executionStartedAt` once the CTA has run.
 
 ### RequirementOutcome
 
@@ -405,4 +410,10 @@ Stop and surface as an architecture finding if:
 9. Messy fixture + metric + import + identity + propagation + avoidance tests  
 10. Instrument JSONB size / command duration; optional load fixture  
 
-Real manufacturer files are executed against this loop after the synthetic fixture is green. P1 is not complete until the north-star question is answerable from persisted events.
+### Measurement gate (not secondary work)
+
+The first real manufacturer file is the gate. Fixture: `fixtures/p1-manufacturer/` (German/Dutch-style CSV: artikelstamm, lieferanten, stückliste, materialien). Path: **empty tenant** → `createImportJob` → graph + requirements + frozen baseline → **zero** `SupplierRequest`s → CTA `executeResolutionRun` (idempotent) → `evaluatePilotRun` has a denominator from events.
+
+Binary XLSX, demo-list cleanup and a synthetic 10k-run remain useful later. They are not the gate. Once one real manufacturer CSV/BOM/supplier set runs this flow without manual database edits, stop abstracting and measure.
+
+P1 is not complete until the north-star question is answerable from persisted events.

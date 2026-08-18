@@ -36,7 +36,7 @@ export function hydrateEngineState(state: EngineState): EngineState {
   return state;
 }
 
-export function emptyState(): EngineState {
+export function emptyState(tenant?: { id: string; name: string }): EngineState {
   return {
     actors: [],
     contacts: [],
@@ -63,7 +63,11 @@ export function emptyState(): EngineState {
     contactAvoidances: [],
     pilotRuns: [],
     requestGroups: [],
-    tenant: { id: "acme", name: "Acme Manufacturing B.V.", identityAutoLinkThreshold: 95 },
+    tenant: {
+      id: tenant?.id ?? "acme",
+      name: tenant?.name ?? "Acme Manufacturing B.V.",
+      identityAutoLinkThreshold: 95,
+    },
     seq: 1,
   };
 }
@@ -1633,6 +1637,7 @@ function addSubject(
         kind: command.relationshipKind ?? inferRelationKind(parent?.kind, child?.kind),
         quantity: command.quantity,
         unit: command.unit,
+        supplierActorId: command.supplierId,
         source,
         createdBy: command.createdBy ?? "user",
         createdAt: iso(now),

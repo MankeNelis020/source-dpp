@@ -143,7 +143,7 @@ export function evaluatePilotRun(state: EngineState, run: PilotRun): PilotEvalua
   let resolvedUpstream = 0;
   let resolvedHuman = 0;
   const times: number[] = [];
-  const started = Date.parse(run.startedAt);
+  const started = Date.parse(run.executionStartedAt ?? run.startedAt);
 
   for (const id of cohort) {
     const requirement = state.requirements.find((r) => r.id === id);
@@ -180,7 +180,9 @@ export function evaluatePilotRun(state: EngineState, run: PilotRun): PilotEvalua
   const humanActions = state.identityDecisions.filter((d) => Date.parse(d.createdAt) >= started).length +
     state.tasks.filter((t) => t.status === "done" && Date.parse(t.createdAt) >= started).length;
   const uniqueSuppliers = new Set(
-    state.requests.filter((r) => Date.parse(r.sentAt ?? run.startedAt) >= started).map((r) => r.supplierId)
+    state.requests
+      .filter((r) => Date.parse(r.sentAt ?? run.executionStartedAt ?? run.startedAt) >= started)
+      .map((r) => r.supplierId)
   );
   const newClaims = state.claims.filter((c) => c.ready && (c.requirementId ? cohort.has(c.requirementId) : true));
   const propagated = resolvedSameTenant;
