@@ -12,7 +12,8 @@
     "db:migrate": "tsx src/infrastructure/database/migrate-cli.ts",
     "db:seed": "tsx src/infrastructure/database/seed-cli.ts",
     "storage:bootstrap": "tsx src/infrastructure/storage/bootstrap.ts",
-    "test:storage": "vitest run src/server/source/storage.test.ts src/infrastructure/storage/memory.test.ts src/infrastructure/environment/source-environment.test.ts"
+    "test:storage": "vitest run src/server/source/storage.test.ts src/infrastructure/storage/memory.test.ts src/infrastructure/environment/source-environment.test.ts",
+    "smoke:preview": "tsx scripts/smoke-preview.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",

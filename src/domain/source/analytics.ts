@@ -227,7 +227,9 @@ export function evaluatePilotRun(state: EngineState, run: PilotRun): PilotEvalua
     stillResolving,
     unresolved,
     uniqueSuppliersContacted: uniqueSuppliers.size,
-    supplierContactsAvoided: state.contactAvoidances.filter((row) => cohort.has(row.requirementId)).length,
+    supplierContactsAvoided: new Set(
+      state.contactAvoidances.filter((row) => cohort.has(row.requirementId)).map((row) => row.requirementId)
+    ).size,
     humanReviewActions: humanActions,
     productsUnblocked,
     resolutionLeverage: humanActions + uniqueSuppliers.size === 0 ? resolvedCount : resolvedCount / Math.max(1, humanActions + uniqueSuppliers.size),

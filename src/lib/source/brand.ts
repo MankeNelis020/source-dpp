@@ -60,18 +60,15 @@ export const PUBLIC_NAV = [
 
 export const WORKSPACE_NAV = [
   { href: "/app", label: "Overview" },
+  { href: "/app/import", label: "Upload" },
   { href: "/app/missing", label: "Missing information" },
   { href: "/app/reviews", label: "Needs you" },
-  { href: "/app/pilot", label: "Pilot results" },
+  { href: "/app/pilot", label: "Results" },
   { href: "/app/products", label: "Products" },
   { href: "/app/suppliers", label: "Suppliers" },
   { href: "/app/claims", label: "Claims" },
   { href: "/app/evidence", label: "Evidence" },
-  { href: "/app/requests", label: "Requests" },
-  { href: "/app/reviews", label: "Reviews" },
-  { href: "/app/graph", label: "Graph" },
-  { href: "/app/integrations", label: "Integrations" },
-  { href: "/app/exports", label: "Exports" },
+  { href: "/app/requests", label: "Supplier requests" },
   { href: "/app/settings", label: "Settings" },
 ] as const;
 

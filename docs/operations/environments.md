@@ -98,9 +98,11 @@ Local explicit Postgres: `SOURCE_PERSISTENCE=postgres` plus `SOURCE_APP_DATABASE
 | `SOURCE_INVITATION_TTL_DAYS` | Application runtime | Invitation expiry. Default `7`. |
 | `SOURCE_EXPOSE_INVITE_LINKS` | Local only | Returns invite URLs for tests. Never set in preview/production. |
 | `SOURCE_ENV` | Process | `local` \| `preview` \| `production` |
-| `CRON_SECRET` | Application runtime | Bearer secret for `/api/internal/outbox/process` and related worker routes. Required in preview/production. |
+| `CRON_SECRET` | Application runtime | Bearer secret for `/api/internal/outbox/process`, `/api/internal/engine/tick`, and related worker routes. Required in preview/production. |
 | `RESEND_API_KEY` | `ResendEmailAdapter` only | Server-only. Required in production. Preview only if `SOURCE_EMAIL_MODE=live`. |
 | `RESEND_WEBHOOK_SECRET` | Webhook route | Svix signing secret. Required in production. |
+| `SOURCE_INBOUND_WEBHOOK_SECRET` | Inbound webhook | Optional. Fail-closed if unset: inbound route returns 401. |
+| `SOURCE_INBOUND_REPLY_DOMAIN` | Outbound Reply-To | Optional. When set, SOURCE may emit `reply+{opaque}@domain`. DNS/MX is a human step. |
 | `SOURCE_EMAIL_FROM` | Application runtime | Verified SOURCE From address. |
 | `SOURCE_EMAIL_REPLY_TO` | Application runtime | Optional support mailbox. No inbound parsing. |
 | `SOURCE_EMAIL_MODE` | Process | `test` \| `live`. Preview defaults to `test`. Production is always `live`. |
@@ -305,7 +307,7 @@ npm run db:seed       # local/demo only; refused in preview/production
 npm test              # unit/security tests (memory)
 npm run test:postgres # isolated CI/local Postgres as source_app
 npm run lint
-npm run build
+npm run smoke:preview # Preview health / optional email test; never prints secrets
 ```
 
 CI Postgres is a GitHub Actions service (`postgres://source:source@localhost:5432/source`). It must not point at either Supabase project.

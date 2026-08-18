@@ -119,4 +119,55 @@ describe("golden path — manufacturer import to supplier response", () => {
     expect(evaluation.initialMissing).toBe(afterAnswer.pilotRuns[0].baseline.missing);
     expect(evaluation.resolvedSupplierResponse).toBeGreaterThan(0);
   });
+
+  it("does not send a second email on repeated worker execution or duplicate portal submit", async () => {
+    const store = new MemoryPersistence();
+    const principal = await emptyManufacturerPrincipal(store);
+    await createImportJob(store, principal, manufacturerFiles(), NOW);
+    await executeResolutionRun(store, principal, NOW);
+    const email = new MemoryEmailPort();
+    await processOutboxBatch({ store, email, now: NOW });
+    const firstCount = email.sent.length;
+    await processOutboxBatch({ store, email, now: NOW });
+    expect(email.sent).toHaveLength(firstCount);
+    const token = email.sent[0].text.match(/\/s\/([A-Za-z0-9_-]+)/)![1];
+    const portal = await resolvePortalPrincipal(store, token, NOW);
+    const view = await getSupplierPortalView(store, portal);
+    const question = view.questions[0];
+    const command = {
+      type: "SUBMIT_RESPONSE" as const,
+      caseId: question.id,
+      value: "42",
+      unit: "%",
+      permission: "GRANTED" as const,
+    };
+    const first = await dispatchCommand({
+      store,
+      principal: portal,
+      envelope: {
+        commandId: "portal-dup-1",
+        idempotencyKey: "portal-dup",
+        principalId: portal.grantId,
+        organisationId: portal.organisationId,
+        issuedAt: NOW.toISOString(),
+        command,
+      },
+      now: NOW,
+    });
+    const replay = await dispatchCommand({
+      store,
+      principal: portal,
+      envelope: {
+        commandId: "portal-dup-2",
+        idempotencyKey: "portal-dup",
+        principalId: portal.grantId,
+        organisationId: portal.organisationId,
+        issuedAt: NOW.toISOString(),
+        command: { ...command, value: "99" },
+      },
+      now: NOW,
+    });
+    expect(first.status === "ok" || first.status === "ALREADY_PROCESSED").toBe(true);
+    expect(replay.status).toBe("ALREADY_PROCESSED");
+  });
 });

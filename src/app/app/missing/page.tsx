@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/source/page-header";
-import { Metric, SourceLabel, SourceTable } from "@/components/source/ui";
+import { EmptyState, Metric, SourceButton, SourceLabel, SourceTable } from "@/components/source/ui";
 import { CaseStatePill, formatWhen } from "@/components/source/case-status";
 import { CASE_FILTERS } from "@/domain/source/queries";
 import { useSourceQuery } from "@/client/source/api";
@@ -70,21 +70,27 @@ export default function MissingInformationPage() {
         <Metric value={String(rows.filter((c) => c.state === "UNRESOLVED").length)} label="Unresolved" />
       </div>
 
-      <SourceTable columns={["Case", "Need", "Actor", "Why it is stuck", "Next action", "When", "State"]}>
+      {rows.length === 0 && !loading ? (
+        <EmptyState
+          title="No missing information yet"
+          description="Upload a catalogue so SOURCE can find DPP gaps. If everything is already on file, this list stays empty on purpose."
+          action={<SourceButton href="/app/import">Upload your first catalog</SourceButton>}
+        />
+      ) : (
+      <SourceTable columns={["Need", "For", "Who", "Why it is stuck", "Next action", "When", "State"]}>
         {rows.map((c) => (
           <tr key={c.id} className="border-t border-[#101A15]/8 hover:bg-[#EFF2ED]/80">
-            <td className="px-4 py-3 font-[family-name:var(--font-plex)] text-[12px]">
+            <td className="px-4 py-3">
               <Link href={`/app/missing/${c.id}`} className="hover:underline">
-                {c.id}
+                {c.propertyLabel}
               </Link>
             </td>
             <td className="px-4 py-3">
-              <div>{c.propertyLabel}</div>
-              <SourceLabel className="mt-0.5 block">{c.subjectLabel}</SourceLabel>
+              <SourceLabel className="block">{c.subjectLabel}</SourceLabel>
             </td>
             <td className="px-4 py-3 text-[13px]">{c.actorLabel}</td>
             <td className="px-4 py-3 text-[13px] text-[#101A15]/75">
-              {c.blockingReason ? c.blockingReason.replaceAll("_", " ") : "—"}
+              {c.blockingReason ? c.blockingReason.replaceAll("_", " ").toLowerCase() : "—"}
             </td>
             <td className="px-4 py-3 text-[13px]">{c.nextAction}</td>
             <td className="px-4 py-3 font-[family-name:var(--font-plex)] text-[12px]">{formatWhen(c.nextActionAt)}</td>
@@ -94,6 +100,7 @@ export default function MissingInformationPage() {
           </tr>
         ))}
       </SourceTable>
+      )}
       {board?.activity?.length ? (
         <section className="mt-10">
           <h2 className="font-[family-name:var(--font-space)] text-[20px]">Live activity</h2>

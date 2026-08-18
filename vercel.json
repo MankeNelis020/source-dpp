@@ -3,6 +3,10 @@
     {
       "path": "/api/internal/outbox/process",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/internal/engine/tick",
+      "schedule": "0 * * * *"
     }
   ]
 }

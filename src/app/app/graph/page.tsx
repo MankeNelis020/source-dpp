@@ -1,34 +1,39 @@
-import { URBAN_CHAIR_COMPONENTS } from "@/lib/source/demo-data";
+"use client";
+
 import { PageHeader } from "@/components/source/page-header";
-import { StatusPill } from "@/components/source/ui";
+import { EmptyState, SourceButton, StatusPill } from "@/components/source/ui";
+import { useSourceQuery } from "@/client/source/api";
 
 export default function GraphPage() {
+  const { data } = useSourceQuery<{ products: { id: string; name: string; status: string; openCount: number }[] }>(
+    "/api/source/products"
+  );
+  const products = data?.products ?? [];
+
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader
-        title="Graph"
-        description="Not the default interface. Useful for analysis. Permissions decide what is visible — a shielded upstream supplier appears as a verified upstream source, not a company name."
+        title="Product structure"
+        description="A compact view of imported products. Protected upstream identities stay hidden."
       />
-      <div className="border border-[#101A15]/10 bg-[#FBFCFA] p-8 font-[family-name:var(--font-plex)] text-[13px] leading-8">
-        <div>Urban Chair 04</div>
-        <div className="text-[#101A15]/50">↓ Product · Components · Suppliers · Materials · Claims · Evidence</div>
-        {URBAN_CHAIR_COMPONENTS.map((c) => (
-          <div key={c.id} className="border-l border-[#101A15]/12 pl-4">
-            ├── {c.name}{" "}
-            <StatusPill
-              tone={c.status === "ready" ? "signal" : c.status === "missing" ? "attention" : "teal"}
-            >
-              {c.label}
-            </StatusPill>
-            {c.id === "textile" ? (
-              <div className="pl-6 text-[#101A15]/45">└── Verified upstream source · identity protected</div>
-            ) : null}
-            {c.id === "packaging" ? (
-              <div className="pl-6 text-[#101A15]/45">└── Authorization required before reuse</div>
-            ) : null}
-          </div>
-        ))}
-      </div>
+      {products.length === 0 ? (
+        <EmptyState
+          title="No products imported yet"
+          description="Upload a catalogue to see products and their open information gaps."
+          action={<SourceButton href="/app/import">Upload catalogue</SourceButton>}
+        />
+      ) : (
+        <div className="border border-[#101A15]/10 bg-[#FBFCFA] p-8 font-[family-name:var(--font-plex)] text-[13px] leading-8">
+          {products.slice(0, 40).map((product) => (
+            <div key={product.id} className="border-l border-[#101A15]/12 pl-4">
+              ├── {product.name}{" "}
+              <StatusPill tone={product.status === "ready" ? "signal" : "attention"}>
+                {product.openCount ? `${product.openCount} open` : "ready"}
+              </StatusPill>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

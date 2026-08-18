@@ -46,6 +46,7 @@ export default function ImportWizardPage() {
   const [productFile, setProductFile] = useState<File | null>(null);
   const [supplierFile, setSupplierFile] = useState<File | null>(null);
   const [bomFile, setBomFile] = useState<File | null>(null);
+  const [materialsFile, setMaterialsFile] = useState<File | null>(null);
   const [job, setJob] = useState<ImportJob | null>(null);
   const [events, setEvents] = useState<{ type: string; payload: Record<string, string | number | boolean | null> }[]>([]);
   const [history, setHistory] = useState<ImportJob[]>([]);
@@ -70,6 +71,9 @@ export default function ImportWizardPage() {
         ? await uploadSourceFile({ purpose: "IMPORT_SOURCE", file: supplierFile })
         : undefined;
       const bom = bomFile ? await uploadSourceFile({ purpose: "IMPORT_SOURCE", file: bomFile }) : undefined;
+      const materials = materialsFile
+        ? await uploadSourceFile({ purpose: "IMPORT_SOURCE", file: materialsFile })
+        : undefined;
       setStatus("Processing…");
       const created = await api<ImportJob>("/api/imports", {
         method: "POST",
@@ -78,6 +82,7 @@ export default function ImportWizardPage() {
             products: products.id,
             suppliers: suppliers?.id,
             bom: bom?.id,
+            materials: materials?.id,
           },
         }),
       });
@@ -116,6 +121,7 @@ export default function ImportWizardPage() {
             <FileField label="Products.csv" accept=".csv,text/csv" onFile={setProductFile} file={productFile} />
             <FileField label="Suppliers.csv (optional)" accept=".csv,text/csv" onFile={setSupplierFile} file={supplierFile} />
             <FileField label="BOM.csv (optional)" accept=".csv,text/csv" onFile={setBomFile} file={bomFile} />
+            <FileField label="Materials.csv (optional)" accept=".csv,text/csv" onFile={setMaterialsFile} file={materialsFile} />
           </div>
           {status ? <p className="mt-4 text-[13px] text-[#101A15]/65">{status}</p> : null}
           {error ? <p className="mt-4 text-[13px] text-[#B26B2C]">{error}</p> : null}

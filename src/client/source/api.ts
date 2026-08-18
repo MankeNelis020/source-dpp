@@ -20,6 +20,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export function useSourceQuery<T>(path: string | null) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(Boolean(path));
   const [tick, setTick] = useState(0);
 
@@ -33,11 +34,13 @@ export function useSourceQuery<T>(path: string | null) {
         if (cancelled) return;
         setData(next);
         setError(null);
+        setErrorCode(null);
         setLoading(false);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "Request failed");
+        setErrorCode(err && typeof err === "object" && "code" in err ? String((err as { code?: string }).code ?? "") : null);
         setLoading(false);
       });
     return () => {
@@ -45,7 +48,7 @@ export function useSourceQuery<T>(path: string | null) {
     };
   }, [path, tick]);
 
-  return { data, error, loading, reload };
+  return { data, error, errorCode, loading, reload };
 }
 
 export function useDispatchCommand() {

@@ -1,4 +1,7 @@
-/** Clickable-discovery demo data from the SOURCE product blueprint. */
+/** Clickable-discovery demo data from the SOURCE product blueprint.
+ *  Classification: TEST / DOCUMENTATION FIXTURE only.
+ *  Hosted Preview and Production workspace pages must not import this module.
+ */
 
 export type IdentityStatus = "matched" | "review" | "unresolved";
 export type EvidenceStatus = "ready" | "review" | "missing" | "authorization";

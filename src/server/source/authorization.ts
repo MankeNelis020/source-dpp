@@ -129,7 +129,7 @@ const PORTAL_COMMAND_MAP: Partial<Record<Command["type"], PortalCommand>> = {
   MARK_WRONG_CONTACT: "MARK_WRONG_CONTACT",
 };
 
-export function authorizeUserCommand(principal: Principal, command: Command) {
+export function authorizeUserCommand(principal: { capabilities: Capability[] }, command: Command) {
   const needed = COMMAND_CAPABILITY[command.type];
   if (!needed) throw new SourceError("FORBIDDEN", "Unknown command.", 403);
   if (!principal.capabilities.includes(needed)) {

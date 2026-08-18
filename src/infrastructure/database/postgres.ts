@@ -4,7 +4,7 @@ import type { EngineState, PermissionState, Purpose, TrustLevel } from "@/domain
 import { emptyState, hydrateEngineState } from "@/domain/source";
 import { hashesEqual } from "@/infrastructure/crypto/tokens";
 import type { OutboxRecord, OutboxStatus } from "@/infrastructure/outbox/types";
-import type { EmailProviderEventRecord, OutboundMessageRecord, TransportStatus } from "@/infrastructure/email/transport";
+import type { EmailProviderEventRecord, InboundCorrelationRecord, InboundEmailEventRecord, OutboundMessageRecord, TransportStatus } from "@/infrastructure/email/transport";
 import type {
   ImmutableAuditEvent,
   ImportJob,
@@ -301,6 +301,11 @@ export class PostgresPersistence implements PersistencePort {
    * becomes expensive and concurrency-sensitive — then switch to incremental /
    * event-driven upserts per claim. Do not rebuild that path before it is needed.
    */
+  async listOrganisationIds() {
+    const { rows } = await this.q("SELECT id FROM list_organisation_ids()");
+    return rows.map((row) => String(row.id));
+  }
+
   async saveEngine(organisationId: string, state: EngineState) {
     await this.withTenant(organisationId, async (client) => {
       const name = state.tenant.name || organisationId;
@@ -882,6 +887,59 @@ export class PostgresPersistence implements PersistencePort {
   async getEmailProviderEvent(provider: string, providerEventId: string) {
     const { rows } = await this.q("SELECT * FROM find_email_provider_event($1, $2)", [provider, providerEventId]);
     return rows[0] ? mapProviderEvent(rows[0]) : undefined;
+  }
+
+  async saveInboundCorrelation(record: InboundCorrelationRecord) {
+    await this.withTenant(record.organisationId, async (client) => {
+      await client.query(
+        `INSERT INTO inbound_correlations (id, organisation_id, case_id, request_id, token_hash, created_at, expires_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (id) DO UPDATE SET expires_at = EXCLUDED.expires_at`,
+        [
+          record.id,
+          record.organisationId,
+          record.caseId,
+          record.requestId ?? null,
+          record.tokenHash,
+          record.createdAt,
+          record.expiresAt,
+        ]
+      );
+    });
+  }
+
+  async findInboundCorrelationByTokenHash(hash: string) {
+    const { rows } = await this.q("SELECT * FROM find_inbound_correlation_by_hash($1)", [hash]);
+    if (!rows[0]) return undefined;
+    const row = rows[0] as Record<string, unknown>;
+    return {
+      id: String(row.id),
+      organisationId: String(row.organisation_id ?? row.organisationId),
+      caseId: String(row.case_id ?? row.caseId),
+      requestId: (row.request_id ?? row.requestId) as string | undefined,
+      tokenHash: String(row.token_hash ?? row.tokenHash),
+      createdAt: new Date(String(row.created_at ?? row.createdAt)).toISOString(),
+      expiresAt: new Date(String(row.expires_at ?? row.expiresAt)).toISOString(),
+    };
+  }
+
+  async insertInboundEmailEvent(record: InboundEmailEventRecord) {
+    const { rows } = await this.q(
+      "SELECT insert_inbound_email_event($1,$2,$3,$4,$5,$6,$7,$8::timestamptz,$9::timestamptz,$10) AS ok",
+      [
+        record.id,
+        record.provider,
+        record.providerEventId,
+        record.organisationId ?? null,
+        record.caseId ?? null,
+        record.correlationId ?? null,
+        record.fromNormalized ?? null,
+        record.occurredAt,
+        record.processedAt,
+        record.disposition,
+      ]
+    );
+    return Boolean(rows[0]?.ok);
   }
 
   async saveSession(session: SessionRecord) {

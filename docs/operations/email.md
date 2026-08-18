@@ -12,7 +12,7 @@ Pilot sending domain: one SOURCE-controlled domain or subdomain (conceptual: `re
 
 From: `{{customerName}} via SOURCE <verified-from>`. Do not spoof customer domains.
 
-Reply-To: optional monitored support mailbox (`SOURCE_EMAIL_REPLY_TO`). Inbound parsing is **not** implemented. Direct suppliers to the portal CTA.
+Reply-To: optional monitored support mailbox (`SOURCE_EMAIL_REPLY_TO`). Inbound parsing is an application foundation only (`/api/webhooks/inbound`). Receiving DNS/MX is **not** activated in this milestone. Direct suppliers to the portal CTA until Niel enables Resend Receiving.
 
 ---
 
@@ -83,6 +83,8 @@ Do not reuse preview secrets. Production must not silently rewrite recipients.
 
 Vercel Cron `*/5 * * * *` → `GET/POST /api/internal/outbox/process` with `Authorization: Bearer ${CRON_SECRET}`.
 
+Hourly `0 * * * *` → `/api/internal/engine/tick` for reminder / no-response ticks. Same secret.
+
 Safe to call repeatedly. Response: `{ claimed, succeeded, failed, deadLetter }` — no payloads, no tokens, no addresses.
 
 ---
@@ -114,4 +116,5 @@ Never logged: API keys, full recipient, full From address, request body, portal 
 5. From address
 6. DNS records from Resend (SPF, DKIM, DMARC)
 7. Vercel env as above
-8. After that: hosted smoke test to an allowed inbox — real import → Let SOURCE handle the gaps → real Resend → open `/s/{token}` → upload evidence → READY
+9. After that: hosted smoke test (`npm run smoke:preview`) then a browser pass: real import → Let SOURCE handle the gaps → real Resend → open `/s/{token}` → upload evidence → Results
+10. Resend Receiving / inbound MX — not required for the outbound portal loop

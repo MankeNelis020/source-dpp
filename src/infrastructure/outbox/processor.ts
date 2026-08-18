@@ -130,7 +130,7 @@ function buildOutboundEmail(row: OutboxRecord, to: string): OutboundEmail {
     semanticKey: row.semanticKey,
     to: [to],
     from: String(row.payload.from ?? "SOURCE <requests@localhost>"),
-    replyTo: replyToAddress(),
+    replyTo: typeof row.payload.replyTo === "string" && row.payload.replyTo ? row.payload.replyTo : replyToAddress(),
     subject,
     html,
     text,

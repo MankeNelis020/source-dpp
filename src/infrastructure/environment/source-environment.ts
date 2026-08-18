@@ -69,6 +69,8 @@ export interface SourceEnvironment {
   emailReplyTo?: string;
   resendWebhookSecret?: string;
   emailAllowedRecipients?: string[];
+  inboundWebhookSecret?: string;
+  inboundReplyDomain?: string;
   outboxBatchSize?: number;
   outboxMaxAttempts?: number;
   cronSecret?: string;
@@ -106,6 +108,8 @@ export function loadSourceEnvironment(
   const emailReplyTo = trim(env.SOURCE_EMAIL_REPLY_TO);
   const resendApiKey = trim(env.RESEND_API_KEY);
   const resendWebhookSecret = trim(env.RESEND_WEBHOOK_SECRET);
+  const inboundWebhookSecret = trim(env.SOURCE_INBOUND_WEBHOOK_SECRET);
+  const inboundReplyDomain = trim(env.SOURCE_INBOUND_REPLY_DOMAIN)?.replace(/^@/, "");
   const cronSecret = trim(env.CRON_SECRET);
   const emailAllowedRecipients = parseEmailList(env.SOURCE_EMAIL_ALLOWED_RECIPIENTS);
   const outboxBatchSize = positiveInt(env.SOURCE_OUTBOX_BATCH_SIZE, 20);
@@ -278,6 +282,8 @@ export function loadSourceEnvironment(
     emailFrom,
     emailReplyTo,
     resendWebhookSecret,
+    inboundWebhookSecret,
+    inboundReplyDomain,
     emailAllowedRecipients,
     outboxBatchSize,
     outboxMaxAttempts,

@@ -264,3 +264,21 @@ export function SourceTable({
     </div>
   );
 }
+
+export function EmptyState({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="border border-[#101A15]/10 bg-[#FBFCFA] p-8">
+      <h2 className="font-[family-name:var(--font-space)] text-[20px] tracking-[-0.02em]">{title}</h2>
+      <p className="mt-2 max-w-xl text-[13px] leading-relaxed text-[#101A15]/65">{description}</p>
+      {action ? <div className="mt-5">{action}</div> : null}
+    </div>
+  );
+}

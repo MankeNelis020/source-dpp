@@ -20,7 +20,8 @@ interface CaseDetail {
   actorLabel: string;
   identityModelVersion: string;
   identityScoresAreCalibrated: boolean;
-  actor?: { kind: string; sourceType?: string; name?: string };
+  actor?: { kind: string; sourceType?: string; name?: string; id?: string };
+  identityCandidates?: { id: string; name?: string; legalName?: string; country?: string }[];
   requirement?: { propertyLabel: string; subjectLabel: string; purpose: string; requiredBy: string; productIds: string[] };
   request?: { id: string; status: string };
   attempts: { id: string; method: string; status: string; costEstimate: number; parentAttemptId?: string }[];
@@ -70,8 +71,10 @@ export default function ResolutionCasePage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <SourceLabel>Resolution case</SourceLabel>
-      <h1 className="mt-2 font-[family-name:var(--font-space)] text-[33px] font-medium tracking-[-0.02em]">{resolution.id}</h1>
+      <SourceLabel>Missing information</SourceLabel>
+      <h1 className="mt-2 font-[family-name:var(--font-space)] text-[33px] font-medium tracking-[-0.02em]">
+        {resolution.requirement?.propertyLabel ?? "This gap"}
+      </h1>
       <p className="mt-2 text-[14.5px] text-[#101A15]/70">{resolution.exception?.headline ?? resolution.nextAction}</p>
       {notice ? <p className="mt-3 text-[13px] text-[#B26B2C]">{notice}</p> : null}
       <div className="mt-3 flex flex-wrap gap-2">
@@ -84,8 +87,8 @@ export default function ResolutionCasePage() {
         <Meta k="For" v={resolution.requirement?.subjectLabel ?? "—"} />
         <Meta k="Purpose" v={resolution.requirement?.purpose.replaceAll("_", " ") ?? "—"} />
         <Meta k="Required by" v={resolution.requirement?.requiredBy ?? "—"} />
-        <Meta k="Current actor" v={resolution.actorLabel} />
-        <Meta k="Attempts" v={String(resolution.attempts.length)} />
+        <Meta k="Who SOURCE asked" v={resolution.actorLabel} />
+        <Meta k="Times SOURCE has tried" v={String(resolution.attempts.length)} />
         <Meta k="Owner" v={resolution.ownerLabel ?? "—"} />
         <Meta k="Identity model" v={`${resolution.identityModelVersion} · not a calibrated probability`} />
       </dl>
@@ -189,8 +192,18 @@ export default function ResolutionCasePage() {
           <SourceLabel>Identity review</SourceLabel>
           <p className="mt-2 text-[14.5px]">We&apos;re not sure these are the same supplier. Evidence will not auto-link until you decide.</p>
           <div className="mt-4 flex flex-wrap gap-2">
-            <SourceButton onClick={() => void run({ type: "CONFIRM_IDENTITY", caseId: resolution.id, decision: "confirm", actorId: "acme-alu-gmbh" })}>
-              Confirm
+            <SourceButton
+              onClick={() =>
+                void run({
+                  type: "CONFIRM_IDENTITY",
+                  caseId: resolution.id,
+                  decision: "confirm",
+                  actorId: resolution.identityCandidates?.[0]?.id ?? resolution.actor?.id,
+                })
+              }
+              disabled={!resolution.identityCandidates?.[0]?.id && !resolution.actor?.id}
+            >
+              Confirm {resolution.identityCandidates?.[0]?.name ?? resolution.actorLabel}
             </SourceButton>
             <SourceButton variant="ghost" onClick={() => void run({ type: "CONFIRM_IDENTITY", caseId: resolution.id, decision: "reject" })}>
               Not the same

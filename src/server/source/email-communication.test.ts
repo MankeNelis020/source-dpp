@@ -301,6 +301,81 @@ describe("PR C communication loop", () => {
     expect(store.getOutboundMessage(message.id)?.transportStatus).toBe("DELIVERED");
   });
 
+  it("ignores unknown provider events and events for unknown messages", async () => {
+    const store = new MemoryPersistence();
+    const unknownType = await applyProviderDeliveryEvent({
+      store,
+      provider: "TEST",
+      providerEventId: "opened-1",
+      providerMessageId: "no-such-message",
+      eventType: "email.opened",
+      occurredAt: NOW.toISOString(),
+      now: NOW,
+    });
+    expect(unknownType.duplicate).toBe(false);
+    expect(unknownType.status).toBeUndefined();
+    const replay = await applyProviderDeliveryEvent({
+      store,
+      provider: "TEST",
+      providerEventId: "opened-1",
+      providerMessageId: "no-such-message",
+      eventType: "email.opened",
+      occurredAt: NOW.toISOString(),
+      now: NOW,
+    });
+    expect(replay.duplicate).toBe(true);
+  });
+
+  it("accepts delivered before accepted without regressing later", async () => {
+    const store = new MemoryPersistence();
+    store.insertOutbox({
+      id: "obx-early-del",
+      organisationId: "acme",
+      eventType: "email.queued",
+      aggregateType: "SupplierRequest",
+      aggregateId: "SRC-184821",
+      semanticKey: "SRC-184821:REQUEST_EARLY:v1",
+      payload: { to: "info@supplierb.example", subject: "Need", text: "Hello" },
+      status: "PENDING",
+      availableAt: NOW.toISOString(),
+      attemptCount: 0,
+      createdAt: NOW.toISOString(),
+    });
+    const email = new TestEmailProvider();
+    await processOutboxBatch({ store, email, now: NOW });
+    const message = store.getOutboundMessageBySemanticKey("acme", "SRC-184821:REQUEST_EARLY:v1")!;
+    const delivered = await applyProviderDeliveryEvent({
+      store,
+      provider: "TEST",
+      providerEventId: "early-delivered",
+      providerMessageId: message.providerMessageId,
+      eventType: "email.delivered",
+      occurredAt: NOW.toISOString(),
+      now: NOW,
+    });
+    expect(delivered.status).toBe("DELIVERED");
+    const accepted = await applyProviderDeliveryEvent({
+      store,
+      provider: "TEST",
+      providerEventId: "late-accepted",
+      providerMessageId: message.providerMessageId,
+      eventType: "email.sent",
+      occurredAt: NOW.toISOString(),
+      now: NOW,
+    });
+    expect(accepted.status).toBe("DELIVERED");
+    const again = await applyProviderDeliveryEvent({
+      store,
+      provider: "TEST",
+      providerEventId: "early-delivered",
+      providerMessageId: message.providerMessageId,
+      eventType: "email.delivered",
+      occurredAt: NOW.toISOString(),
+      now: NOW,
+    });
+    expect(again.duplicate).toBe(true);
+  });
+
   it("stops automatic reminders after a complaint", async () => {
     const store = new MemoryPersistence();
     const principal = await resolveUserPrincipal(store, "user-acme-owner", "acme");

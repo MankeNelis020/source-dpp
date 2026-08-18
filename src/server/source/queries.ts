@@ -47,6 +47,11 @@ export interface NeedsYouTask {
   unlock: number;
   requirementsUnlocked?: number;
   minutesEstimate: number;
+  candidateActorId?: string;
+  blockingReason?: string;
+  tried?: string;
+  why?: string;
+  afterAction?: string;
 }
 
 function loadTenant(store: PersistencePort, principal: Principal): Promise<EngineState> | EngineState {
@@ -186,6 +191,13 @@ export async function getCaseDetail(store: PersistencePort, principal: Principal
     identityScoresAreCalibrated: false,
     actor: projectActor(state, resolution.currentActorId),
     actorLabel: safeActorLabel(state, resolution.currentActorId),
+    identityCandidates: (resolution.identityCandidateIds ?? [])
+      .map((id) => {
+        const actor = projectActor(state, id);
+        if (!actor || actor.kind === "protected") return undefined;
+        return { id, name: actor.name, legalName: actor.legalName, country: actor.country };
+      })
+      .filter((row): row is NonNullable<typeof row> => Boolean(row)),
     requirement: requirement
       ? {
           id: requirement.id,
@@ -320,6 +332,8 @@ export async function getNeedsYouTasks(store: PersistencePort, principal: Princi
       const related = state.requirements.filter((r) => r.subjectId === subjectId && !r.resolvedAt);
       const unlock = new Set(related.flatMap((r) => r.productIds)).size || requirement?.productIds.length || 1;
       const requirementsUnlocked = related.length;
+      const resolution = state.cases.find((c) => c.id === t.caseId);
+      const exception = resolution?.blockingReason ? explainException(resolution.blockingReason) : null;
       return {
         id: t.id,
         caseId: t.caseId,
@@ -330,6 +344,11 @@ export async function getNeedsYouTasks(store: PersistencePort, principal: Princi
         unlock,
         requirementsUnlocked,
         minutesEstimate: t.kind === "identity" ? 4 : 5,
+        candidateActorId: resolution?.identityCandidateIds?.[0] ?? resolution?.currentActorId,
+        blockingReason: resolution?.blockingReason,
+        tried: exception ? resolution?.blockingExplanation ?? exception.reason : t.context,
+        why: exception?.reason,
+        afterAction: exception?.nextAction,
       };
     });
   return tasks.sort((a, b) => b.unlock - a.unlock);
@@ -344,6 +363,9 @@ export async function getSupplierPortalView(store: PersistencePort, principal: P
     allowedCommands: principal.allowedCommands,
     questions: cases.map((c) => {
       const requirement = state.requirements.find((r) => r.id === c.requirementId);
+      const products = (requirement?.productIds ?? [])
+        .map((id) => state.subjects.find((s) => s.id === id)?.name ?? id)
+        .filter(Boolean);
       return {
         id: c.id,
         version: c.version,
@@ -351,6 +373,13 @@ export async function getSupplierPortalView(store: PersistencePort, principal: P
         propertyLabel: requirement?.propertyLabel,
         subjectLabel: requirement?.subjectLabel,
         nextAction: c.nextAction,
+        purpose: requirement?.purpose,
+        requiredBy: requirement?.requiredBy,
+        productNames: products,
+        whyRequested: requirement
+          ? `${requirement.propertyLabel} is needed for ${requirement.subjectLabel} (${requirement.purpose.replaceAll("_", " ").toLowerCase()}).`
+          : c.nextAction,
+        submitted: RESOLVED.includes(c.state) || c.state === "RESPONSE_RECEIVED" || c.state === "VALIDATING",
       };
     }),
   };
@@ -598,4 +627,111 @@ export async function getPilotResults(store: PersistencePort, principal: Princip
   }
   const evaluation = evaluatePilotRun(state, run);
   return { run, evaluation, sentences: humanPilotSentences(evaluation) };
+}
+
+export async function listCatalogueProducts(store: PersistencePort, principal: Principal) {
+  const state = await loadTenant(store, principal);
+  return state.subjects
+    .filter((s) => s.kind === "PRODUCT" || s.kind === "VARIANT")
+    .map((subject) => {
+      const related = state.cases.filter((c) => {
+        const requirement = state.requirements.find((r) => r.id === c.requirementId);
+        return c.productId === subject.id || requirement?.productIds.includes(subject.id) || requirement?.subjectId === subject.id;
+      });
+      const ready = related.filter((c) => RESOLVED.includes(c.state)).length;
+      const identityReview = related.some((c) => c.state === "IDENTITY_REVIEW");
+      const supplierId = related.find((c) => c.supplierId && !isConfidentialActor(state, c.supplierId))?.supplierId;
+      return {
+        id: subject.id,
+        name: subject.name,
+        kind: subject.kind,
+        source: subject.source,
+        supplierLabel: supplierId ? safeActorLabel(state, supplierId) : "—",
+        identity: identityReview ? "review" : related.some((c) => c.identityStatus === "IDENTITY_MATCHED") ? "matched" : "unresolved",
+        readyCount: ready,
+        openCount: related.filter((c) => !RESOLVED.includes(c.state) && c.state !== "UNRESOLVED").length,
+        unresolvedCount: related.filter((c) => c.state === "UNRESOLVED").length,
+        status: related.length === 0 ? "unknown" : related.every((c) => RESOLVED.includes(c.state)) ? "ready" : "missing",
+      };
+    });
+}
+
+export async function listCatalogueSuppliers(store: PersistencePort, principal: Principal) {
+  const state = await loadTenant(store, principal);
+  return state.actors
+    .filter((a) => a.kind === "organisation" && a.id !== state.tenant.id && !a.confidential)
+    .map((actor) => {
+      const cases = state.cases.filter((c) => c.supplierId === actor.id || c.currentActorId === actor.id);
+      const products = new Set(cases.map((c) => c.productId).filter(Boolean));
+      return {
+        id: actor.id,
+        name: actor.name,
+        legalName: actor.legalName,
+        country: actor.country,
+        productsSupplied: products.size,
+        openRequirements: cases.filter((c) => !RESOLVED.includes(c.state) && c.state !== "UNRESOLVED").length,
+        waiting: cases.filter((c) => c.state === "WAITING_RESPONSE" || c.state === "WAITING_UPSTREAM").length,
+        needsYou: cases.filter((c) => NEEDS_YOU.includes(c.state)).length,
+        requests: state.requests.filter((r) => r.supplierId === actor.id).length,
+        contactsAvoided: state.contactAvoidances.filter((row) => row.supplierActorId === actor.id).length,
+        status: cases.some((c) => NEEDS_YOU.includes(c.state) || c.state === "UNRESOLVED") ? "attention" : "ok",
+      };
+    });
+}
+
+export async function listCatalogueClaims(store: PersistencePort, principal: Principal) {
+  const state = await loadTenant(store, principal);
+  return state.claims.map((claim) => {
+    const evidence = claim.evidenceId ? projectEvidenceForState(state, state.evidence.find((e) => e.id === claim.evidenceId), principal.capabilities) : undefined;
+    const actor = projectActor(state, claim.declaredByActorId);
+    return {
+      id: claim.id,
+      property: claim.propertyId,
+      value: claim.value,
+      unit: claim.unit,
+      subject: state.subjects.find((s) => s.id === claim.subjectId)?.name ?? claim.subjectId,
+      productId: claim.productId,
+      declaredBy: actor && actor.kind !== "protected" ? actor.name : "Protected source",
+      ready: claim.ready,
+      trustLevel: claim.trustLevel,
+      permissionState: claim.permissionState,
+      validUntil: claim.validUntil,
+      identityConfidence: claim.identityConfidence,
+      evidenceVisible: evidence?.type === "EVIDENCE_RECORD",
+    };
+  });
+}
+
+export async function listSupplierRequests(store: PersistencePort, principal: Principal) {
+  const state = await loadTenant(store, principal);
+  return Promise.all(
+    state.requests.map(async (request) => {
+      const related = state.cases.filter((c) => c.requestId === request.id || c.id === request.caseId);
+      const delivery = request.caseId ? await projectDelivery(store, principal.organisationId, state, request.caseId) : undefined;
+      return {
+        id: request.id,
+        caseId: request.caseId,
+        supplierId: request.supplierId && !isConfidentialActor(state, request.supplierId) ? request.supplierId : undefined,
+        supplierLabel: safeActorLabel(state, request.supplierId),
+        status: request.status,
+        sentAt: request.sentAt,
+        dueAt: request.dueAt,
+        reminderCount: request.reminderCount,
+        complete: related.filter((c) => RESOLVED.includes(c.state)).length,
+        total: related.length || 1,
+        delivery,
+      };
+    })
+  );
+}
+
+export async function getRequestDetail(store: PersistencePort, principal: Principal, requestId: string) {
+  const rows = await listSupplierRequests(store, principal);
+  const request = rows.find((row) => row.id === requestId);
+  if (!request) throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
+  const cases = await getCaseList(store, principal, "all");
+  return {
+    ...request,
+    cases: cases.filter((c) => c.id === request.caseId || c.supplierId === request.supplierId),
+  };
 }

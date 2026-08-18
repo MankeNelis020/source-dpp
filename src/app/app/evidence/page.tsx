@@ -64,6 +64,9 @@ export default function EvidenceLibraryPage() {
         {stage ? <p className="mt-2 text-[13px] text-[#101A15]/70">{stage}</p> : null}
       </div>
       {error ? <p className="text-[13px] text-[#B26B2C]">{error}</p> : null}
+      {(data?.items ?? []).length === 0 && !error ? (
+        <p className="mb-6 text-[13px] text-[#101A15]/65">No evidence uploaded yet. Files you add here stay private to this organisation.</p>
+      ) : null}
       <SourceTable columns={["Document", "Status", "Valid until"]}>
         {(data?.items ?? []).map((e, index) => (
           <tr key={e.opaqueRef ?? String(index)} className="border-t border-[#101A15]/8 hover:bg-[#EFF2ED]/80">

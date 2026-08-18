@@ -336,6 +336,7 @@ function openRequirement(
     identityStatus: identity.status,
     identityConfidence: identity.candidates[0]?.confidence ?? (identity.status === "IDENTITY_MATCHED" ? 99.8 : undefined),
     identityModelVersion: IDENTITY_ENGINE_VERSION,
+    identityCandidateIds: identity.candidates.map((c) => c.actor.id),
     productId: requirement.productIds[0],
     supplierId: identity.selected?.id ?? command.declaredSupplierId,
     automationLevel: "L2",

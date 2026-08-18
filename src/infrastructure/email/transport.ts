@@ -36,6 +36,29 @@ export interface OutboundMessageRecord {
   lastError?: string;
 }
 
+export interface InboundCorrelationRecord {
+  id: string;
+  organisationId: string;
+  caseId: string;
+  requestId?: string;
+  tokenHash: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface InboundEmailEventRecord {
+  id: string;
+  provider: string;
+  providerEventId: string;
+  organisationId?: string;
+  caseId?: string;
+  correlationId?: string;
+  fromNormalized?: string;
+  occurredAt: string;
+  processedAt: string;
+  disposition: "stored" | "ignored" | "duplicate" | "untrusted" | "unknown_correlation";
+}
+
 export interface EmailProviderEventRecord {
   id: string;
   organisationId?: string;

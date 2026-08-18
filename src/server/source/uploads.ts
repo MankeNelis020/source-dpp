@@ -57,7 +57,12 @@ export async function createUploadIntent(args: {
     originalFilename: basenameHint(args.input.filenameHint),
     mimeType: args.input.mimeHint,
     sizeBytes: args.input.sizeHint,
-    createdByPrincipalId: args.principal.kind === "user" ? args.principal.userId : args.principal.grantId,
+    createdByPrincipalId:
+      args.principal.kind === "user"
+        ? args.principal.userId
+        : args.principal.kind === "supplier_portal"
+          ? args.principal.grantId
+          : "SOURCE_SYSTEM",
     createdViaPortalGrantId: args.principal.kind === "supplier_portal" ? args.principal.grantId : undefined,
     caseId: args.input.caseId,
     requirementId: args.input.requirementId,
@@ -321,6 +326,9 @@ async function authorizeUpload(
       throw new SourceError("FORBIDDEN", "You cannot upload evidence.", 403);
     }
     return;
+  }
+  if (principal.kind !== "supplier_portal") {
+    throw new SourceError("FORBIDDEN", "You cannot perform this action.", 403);
   }
   if (purpose !== "EVIDENCE") {
     throw new SourceError("FORBIDDEN", "This portal grant cannot perform that action.", 403);

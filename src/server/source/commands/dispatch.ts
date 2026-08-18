@@ -145,7 +145,7 @@ export async function dispatchCommand(args: {
   const rateLimiter = args.rateLimiter ?? getMemoryRateLimiter();
 
   try {
-    if (principal.kind === "user") {
+    if (principal.kind === "user" || principal.kind === "system") {
       if (envelope.organisationId !== principal.organisationId) {
         throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
       }
