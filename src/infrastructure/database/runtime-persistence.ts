@@ -37,7 +37,13 @@ export function createRuntimePersistence(env: SourceEnvironment): RuntimePersist
     );
   }
 
-  const pool = createPostgresPool(env.appDatabaseUrl, "app");
+  if ((env.runtime === "preview" || env.runtime === "production") && !env.supabaseDbCaCert) {
+    throw new SourceEnvironmentError(
+      "SOURCE environment configuration mismatch: SUPABASE_DB_CA_CERT is required for hosted Postgres TLS."
+    );
+  }
+
+  const pool = createPostgresPool(env.appDatabaseUrl, "app", { ca: env.supabaseDbCaCert });
   return {
     store: new PostgresPersistence(pool),
     kind: "postgres",

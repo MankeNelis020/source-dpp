@@ -13,7 +13,7 @@ async function main() {
       "SOURCE_MIGRATOR_DATABASE_URL is required to apply migrations. Do not use SOURCE_APP_DATABASE_URL for DDL."
     );
   }
-  const pool = createPostgresPool(url, "migrator");
+  const pool = createPostgresPool(url, "migrator", { ca: env.supabaseDbCaCert });
   try {
     const result = await applyMigrations(pool);
     const applied = result.applied.length ? result.applied.join(", ") : "(none)";
