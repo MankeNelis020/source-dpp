@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: source
+          POSTGRES_PASSWORD: source
+          POSTGRES_DB: source
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U source -d source"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://source:source@localhost:5432/source
+      SOURCE_REQUIRE_POSTGRES: "1"
+      SOURCE_DEMO_AUTH: "1"
+      SOURCE_SESSION_SECRET: ci-session-secret-not-for-production
+      SOURCE_OPAQUE_REF_SECRET: ci-opaque-ref-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:postgres
+      - run: npm run lint
+      - run: npm run build

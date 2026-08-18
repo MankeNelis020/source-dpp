@@ -22,6 +22,39 @@ export interface CsvBundle {
   materials?: string;
 }
 
+const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
+const MAX_ROWS = 5000;
+const MAX_COLS = 80;
+
+export function neutralizeCsvFormula(value: string): string {
+  if (/^[=+\-@\t\r]/.test(value)) return `'${value}`;
+  return value;
+}
+
+export function assertSafeImportPayload(files: CsvBundle) {
+  for (const [name, text] of Object.entries(files)) {
+    if (!text) continue;
+    if (Buffer.byteLength(text, "utf8") > MAX_IMPORT_BYTES) {
+      throw new SourceError("VALIDATION", `Import file ${name} exceeds size limit.`, 400);
+    }
+    if (text.includes("\0")) {
+      throw new SourceError("VALIDATION", `Import file ${name} is malformed.`, 400);
+    }
+    const parsed = parseCsv(text);
+    if (parsed.headers.length > MAX_COLS) {
+      throw new SourceError("VALIDATION", `Import file ${name} has too many columns.`, 400);
+    }
+    if (parsed.rows.length > MAX_ROWS) {
+      throw new SourceError("VALIDATION", `Import file ${name} has too many rows.`, 400);
+    }
+    for (const row of parsed.rows) {
+      for (const [key, value] of Object.entries(row)) {
+        row[key] = neutralizeCsvFormula(value);
+      }
+    }
+  }
+}
+
 interface Row {
   [key: string]: string;
 }
@@ -97,7 +130,7 @@ export function proposeMapping(headers: string[]): Record<string, string> {
   return mapping;
 }
 
-function emit(store: PersistencePort, job: ImportJob, type: string, payload: ImportJobEvent["payload"], now: Date) {
+async function emit(store: PersistencePort, job: ImportJob, type: string, payload: ImportJobEvent["payload"], now: Date) {
   const event: ImportJobEvent = {
     id: store.nextId("ievt"),
     jobId: job.id,
@@ -105,14 +138,15 @@ function emit(store: PersistencePort, job: ImportJob, type: string, payload: Imp
     payload,
     createdAt: now.toISOString(),
   };
-  store.appendImportEvent(event);
+  await store.appendImportEvent(event);
   return event;
 }
 
-export function createImportJob(store: PersistencePort, principal: Principal, files: CsvBundle, now = new Date()): ImportJob {
+export async function createImportJob(store: PersistencePort, principal: Principal, files: CsvBundle, now = new Date()): Promise<ImportJob> {
   if (!hasCapability(principal, "import:manage")) {
     throw new SourceError("FORBIDDEN", "You cannot start an import.", 403);
   }
+  assertSafeImportPayload(files);
   const products = files.products ? parseCsv(files.products) : { headers: [], rows: [] };
   const mapping = proposeMapping(products.headers);
   const job: ImportJob = {
@@ -127,19 +161,19 @@ export function createImportJob(store: PersistencePort, principal: Principal, fi
     startedAt: now.toISOString(),
     mapping,
   };
-  store.saveImportJob(job);
-  emit(store, job, "stage.started", { stage: "UPLOADED" }, now);
+  await store.saveImportJob(job);
+  await emit(store, job, "stage.started", { stage: "UPLOADED" }, now);
   return runImportJob(store, principal, job.id, files, now);
 }
 
-export function runImportJob(
+export async function runImportJob(
   store: PersistencePort,
   principal: Principal,
   jobId: string,
   files: CsvBundle,
   now = new Date()
-): ImportJob {
-  const job = store.getImportJob(jobId);
+): Promise<ImportJob> {
+  const job = await store.getImportJob(jobId);
   if (!job || job.organisationId !== principal.organisationId) {
     throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
   }
@@ -163,24 +197,24 @@ export function runImportJob(
   for (const stage of STAGES) {
     job.state = stage;
     job.currentStage = stage;
-    emit(store, job, "stage.started", { stage }, now);
+    await emit(store, job, "stage.started", { stage }, now);
     if (stage === "PARSING") {
-      emit(store, job, "progress.updated", { found: counts.products, entity: "products" }, now);
-      emit(store, job, "entity.detected", { count: counts.products, entity: "products" }, now);
-      emit(store, job, "entity.detected", { count: counts.suppliers, entity: "suppliers" }, now);
+      await emit(store, job, "progress.updated", { found: counts.products, entity: "products" }, now);
+      await emit(store, job, "entity.detected", { count: counts.products, entity: "products" }, now);
+      await emit(store, job, "entity.detected", { count: counts.suppliers, entity: "suppliers" }, now);
     }
     if (stage === "RELATIONSHIP_BUILDING") {
-      emit(store, job, "relationship.created", { count: counts.relationships }, now);
+      await emit(store, job, "relationship.created", { count: counts.relationships }, now);
     }
     if (stage === "IDENTITY_RESOLUTION") {
-      emit(store, job, "entity.matched", { count: Math.max(0, counts.suppliers - reviewSuppliers), needsReview: reviewSuppliers }, now);
+      await emit(store, job, "entity.matched", { count: Math.max(0, counts.suppliers - reviewSuppliers), needsReview: reviewSuppliers }, now);
     }
     job.processedCount = job.totalCount;
-    emit(store, job, "stage.completed", { stage }, now);
-    store.saveImportJob(job);
+    await emit(store, job, "stage.completed", { stage }, now);
+    await store.saveImportJob(job);
   }
 
-  const state = store.loadEngine(principal.organisationId);
+  const state = await store.loadEngine(principal.organisationId);
   let generated = 0;
   for (const row of validProducts) {
     const name = row.name || row.Name || row.sku || "Imported product";
@@ -202,7 +236,7 @@ export function runImportJob(
       generated += 1;
     }
   }
-  store.saveEngine(principal.organisationId, state);
+  await store.saveEngine(principal.organisationId, state);
 
   job.warningCount = reviewSuppliers;
   job.errorCount = invalidProducts.length;
@@ -218,19 +252,19 @@ export function runImportJob(
   job.state = invalidProducts.length ? "PARTIAL" : "COMPLETE";
   job.completedAt = now.toISOString();
   job.currentStage = job.state;
-  emit(store, job, job.state === "PARTIAL" ? "import.partial" : "import.completed", job.summary, now);
-  store.saveImportJob(job);
+  await emit(store, job, job.state === "PARTIAL" ? "import.partial" : "import.completed", job.summary, now);
+  await store.saveImportJob(job);
   return job;
 }
 
-export function getImportProgress(store: PersistencePort, principal: Principal, jobId: string) {
-  const job = store.getImportJob(jobId);
+export async function getImportProgress(store: PersistencePort, principal: Principal, jobId: string) {
+  const job = await store.getImportJob(jobId);
   if (!job || job.organisationId !== principal.organisationId) {
     throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
   }
   return {
     job,
-    events: store.listImportEvents(jobId),
+    events: await store.listImportEvents(jobId),
     percent: job.totalCount ? Math.round((job.processedCount / job.totalCount) * 100) : job.state === "COMPLETE" ? 100 : 0,
   };
 }

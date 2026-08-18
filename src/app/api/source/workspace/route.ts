@@ -1,11 +1,11 @@
 import { jsonError, principalFromRequest } from "../_lib";
-import { getMemoryPersistence } from "@/infrastructure/database/memory";
+import { getPersistence } from "@/infrastructure/runtime";
 import { getWorkspaceOverview } from "@/server/source/queries";
 
 export async function GET() {
   try {
     const principal = await principalFromRequest();
-    return Response.json(getWorkspaceOverview(getMemoryPersistence(), principal));
+    return Response.json(await getWorkspaceOverview(getPersistence(), principal));
   } catch (error) {
     return jsonError(error);
   }

@@ -1,6 +1,7 @@
--- SOURCE P0 PostgreSQL schema
+-- SOURCE logical schema (P0 + P0.1). Runtime DDL lives in migrations/.
 -- Application authorization is mandatory. RLS is defense in depth, not a substitute.
--- Tenant context must be set by the application: SET LOCAL source.organisation_id = '<uuid>';
+-- Tenant context: SET LOCAL source.organisation_id = '<id>';
+-- Organisation ids are TEXT domain identifiers, not generated UUIDs.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 

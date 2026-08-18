@@ -23,6 +23,7 @@ export const ROLE_CAPABILITIES: Record<Role, Capability[]> = {
     "import:manage",
     "case:read",
     "case:resolve",
+    "audit:read_internal",
   ],
   ADMIN: [
     "claim:read",
@@ -43,6 +44,7 @@ export const ROLE_CAPABILITIES: Record<Role, Capability[]> = {
     "import:manage",
     "case:read",
     "case:resolve",
+    "audit:read_internal",
   ],
   COMPLIANCE_MANAGER: [
     "claim:read",
@@ -75,7 +77,7 @@ export const ROLE_CAPABILITIES: Record<Role, Capability[]> = {
     "case:read",
   ],
   REVIEWER: ["claim:read", "evidence:read", "identity:review", "case:read", "case:resolve"],
-  AUDITOR: ["claim:read", "evidence:read", "case:read"],
+  AUDITOR: ["claim:read", "evidence:read", "case:read", "audit:read_internal"],
 };
 
 const COMMAND_CAPABILITY: Partial<Record<Command["type"], Capability>> = {

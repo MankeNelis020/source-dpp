@@ -1,4 +1,4 @@
-import { getMemoryPersistence } from "@/infrastructure/database/memory";
+import { getPersistence } from "@/infrastructure/runtime";
 import { dispatchCommand, resolveUserPrincipal } from "@/server/source/commands/dispatch";
 import { resolvePortalPrincipal } from "@/server/source/portal";
 import {
@@ -15,7 +15,7 @@ import {
 import { createImportJob, getImportProgress } from "@/server/source/import/service";
 
 export const sourceApp = {
-  store: () => getMemoryPersistence(),
+  store: () => getPersistence(),
   dispatchCommand,
   resolveUserPrincipal,
   resolvePortalPrincipal,

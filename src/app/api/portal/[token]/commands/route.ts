@@ -1,18 +1,21 @@
 import { NextRequest } from "next/server";
-import { getMemoryPersistence } from "@/infrastructure/database/memory";
+import { getPersistence, getRuntimeRateLimiter } from "@/infrastructure/runtime";
 import { dispatchCommand } from "@/server/source/commands/dispatch";
 import { resolvePortalPrincipal } from "@/server/source/portal";
 import type { Command } from "@/domain/source/types";
 import { jsonError, originAllowed } from "../../../source/_lib";
+import { tokenFingerprint } from "@/infrastructure/crypto/tokens";
 
 export async function POST(request: NextRequest, context: { params: Promise<{ token: string }> }) {
   try {
-    if (!originAllowed(request)) return Response.json({ error: "FORBIDDEN", message: "Invalid origin." }, { status: 403 });
+    if (!originAllowed(request, "bearer")) {
+      return Response.json({ error: "FORBIDDEN", message: "Invalid origin." }, { status: 403 });
+    }
     const { token } = await context.params;
-    const store = getMemoryPersistence();
-    const principal = resolvePortalPrincipal(store, token);
+    const store = getPersistence();
+    const principal = await resolvePortalPrincipal(store, token);
     const body = (await request.json()) as { command: Command; expectedVersion?: number; idempotencyKey?: string };
-    const outcome = dispatchCommand({
+    const outcome = await dispatchCommand({
       store,
       principal,
       envelope: {
@@ -24,6 +27,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
         expectedVersion: body.expectedVersion,
         command: body.command,
       },
+      rateLimiter: getRuntimeRateLimiter(),
+      clientIp: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local",
+      tokenFingerprint: tokenFingerprint(token),
     });
     return Response.json(outcome);
   } catch (error) {

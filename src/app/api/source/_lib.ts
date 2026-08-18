@@ -1,7 +1,9 @@
-import { getMemoryPersistence } from "@/infrastructure/database/memory";
+import { getPersistence } from "@/infrastructure/runtime";
 import { readSessionCookie } from "@/infrastructure/auth/session";
 import { resolveUserPrincipal } from "@/server/source/commands/dispatch";
 import { SourceError, type Principal } from "@/server/source/types";
+import { demoAuthEnabled } from "@/infrastructure/runtime";
+export { originAllowed } from "@/server/source/http-security";
 
 export function jsonError(error: unknown) {
   if (error instanceof SourceError) {
@@ -11,20 +13,15 @@ export function jsonError(error: unknown) {
 }
 
 export async function principalFromRequest(): Promise<Principal> {
-  const store = getMemoryPersistence();
+  const store = getPersistence();
   const session = await readSessionCookie();
-  if (session) return resolveUserPrincipal(store, session.userId, session.organisationId);
-  return resolveUserPrincipal(store, "user-acme-owner", "acme");
-}
-
-export function originAllowed(request: Request): boolean {
-  const origin = request.headers.get("origin");
-  if (!origin) return true;
-  const host = request.headers.get("host");
-  if (!host) return true;
-  try {
-    return new URL(origin).host === host;
-  } catch {
-    return false;
+  if (session) {
+    const record = await store.getSession(session.sid);
+    if (record?.revokedAt) throw new SourceError("UNAUTHENTICATED", "Sign in required.", 401);
+    return await resolveUserPrincipal(store, session.userId, session.organisationId);
   }
+  if (demoAuthEnabled()) {
+    return await resolveUserPrincipal(store, "user-acme-owner", "acme");
+  }
+  throw new SourceError("UNAUTHENTICATED", "Sign in required.", 401);
 }

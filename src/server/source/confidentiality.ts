@@ -1,5 +1,14 @@
 import { visibleActorName } from "@/domain/source/cycles";
 import type { AuditEvent, EngineState, EvidenceRecord, ResolutionCase } from "@/domain/source/types";
+import {
+  evaluateActorDisclosure,
+  evaluateEvidenceDisclosure,
+  isConfidentialActor,
+  projectEvidenceRecord,
+  type EvidenceProjection,
+} from "./disclosure";
+import { projectDomainEvent, fallbackSanitizeText, type AuditProjection } from "./audit";
+import type { Capability } from "./types";
 
 export type ActorProjection =
   | {
@@ -16,17 +25,12 @@ export type ActorProjection =
       trustLevel: "VERIFIED";
     };
 
-export function isConfidentialActor(state: EngineState, actorId: string | undefined): boolean {
-  if (!actorId) return false;
-  const actor = state.actors.find((a) => a.id === actorId);
-  if (actor?.confidential) return true;
-  const rel = state.relationships.find((r) => r.toActorId === actorId);
-  return Boolean(rel?.confidentialUpstream);
-}
+export { isConfidentialActor };
 
 export function projectActor(state: EngineState, actorId: string | undefined): ActorProjection | undefined {
   if (!actorId) return undefined;
-  if (isConfidentialActor(state, actorId)) {
+  const decision = evaluateActorDisclosure(state, actorId);
+  if (!decision.canRevealIdentity) {
     return {
       kind: "protected",
       sourceType: "PROTECTED_UPSTREAM_SOURCE",
@@ -57,49 +61,70 @@ export function safeActorLabel(state: EngineState, actorId: string | undefined):
 }
 
 export function projectEvidence(
+  organisationId: string,
   evidence: EvidenceRecord | undefined,
-  canReadPrivate: boolean
-): { id: string; filename?: string; expired: boolean; status: string } | undefined {
+  capabilities: Capability[]
+): EvidenceProjection | undefined {
   if (!evidence) return undefined;
-  if (evidence.visibility === "private" && !canReadPrivate) {
-    return { id: evidence.id, expired: evidence.expired, status: "verified" };
-  }
-  if (evidence.visibility === "protected") {
-    return { id: evidence.id, expired: evidence.expired, status: "verified" };
-  }
-  return {
-    id: evidence.id,
-    filename: evidence.filename,
-    expired: evidence.expired,
-    status: evidence.expired ? "expired" : "on_file",
-  };
+  const decision = evaluateEvidenceDisclosure({
+    state: { tenant: { id: organisationId } } as EngineState,
+    evidence,
+    capabilities,
+    organisationId,
+  });
+  // Visibility must be evaluated with the real engine state for confidential owners.
+  return projectEvidenceRecord(organisationId, evidence, decision);
 }
 
-export function sanitizeAudit(state: EngineState, event: AuditEvent): { id: string; type: string; timestamp: string; detail: string; policy?: string } {
-  let detail = event.detail;
-  for (const actor of state.actors) {
-    if (!isConfidentialActor(state, actor.id)) continue;
-    detail = detail.replaceAll(actor.name, "verified upstream source").replaceAll(actor.legalName, "verified upstream source").replaceAll(actor.id, "protected");
-  }
-  return {
-    id: event.id,
-    type: event.type,
-    timestamp: event.timestamp,
-    detail,
-    policy: event.policy,
-  };
+export function projectEvidenceForState(
+  state: EngineState,
+  evidence: EvidenceRecord | undefined,
+  capabilities: Capability[]
+): EvidenceProjection | undefined {
+  if (!evidence) return undefined;
+  const decision = evaluateEvidenceDisclosure({
+    state,
+    evidence,
+    capabilities,
+    organisationId: state.tenant.id,
+  });
+  return projectEvidenceRecord(state.tenant.id, evidence, decision);
 }
 
-export function leakScan(payload: unknown): string[] {
+/** @deprecated Primary enforcement is structured disclosure. Kept as a defensive fallback. */
+export function sanitizeAudit(state: EngineState, event: AuditEvent): AuditProjection {
+  return projectDomainEvent(state, event, "tenant");
+}
+
+export function leakScan(payload: unknown, extraSecrets: string[] = []): string[] {
   const text = JSON.stringify(payload);
   const leaks: string[] = [];
-  if (text.includes("mill-north")) leaks.push("mill-north");
-  if (text.includes("mill-private")) leaks.push("mill-private");
-  if (text.includes("Secret Mill")) leaks.push("Secret Mill");
-  if (text.includes("Nordic Fibre Mill")) leaks.push("Nordic Fibre Mill");
-  if (text.includes("portalToken")) leaks.push("portalToken");
-  if (text.includes("nordic-origin-certificate")) leaks.push("foreign-evidence-filename");
+  const secrets = [
+    "mill-north",
+    "mill-private",
+    "Secret Mill",
+    "Nordic Fibre Mill",
+    "portalToken",
+    "nordic-origin-certificate",
+    ...extraSecrets,
+  ];
+  for (const secret of secrets) {
+    if (secret && text.includes(secret) && !leaks.includes(secret)) leaks.push(secret);
+  }
   return leaks;
+}
+
+export function assertNoLeaks(payload: unknown, secrets: string[]) {
+  const serialized = JSON.stringify(payload);
+  const hits = secrets.filter((s) => s.length >= 3 && serialized.includes(s));
+  if (hits.length) {
+    throw new Error(`Projection leaked confidential values: ${hits.join(", ")}`);
+  }
+  return serialized;
+}
+
+export function defensiveSanitize(state: EngineState, text: string): string {
+  return fallbackSanitizeText(state, text);
 }
 
 export function caseWithoutSecrets(resolution: ResolutionCase) {
