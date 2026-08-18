@@ -32,7 +32,7 @@ if (process.env.NODE_ENV === "production") {
 }
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["pg"],
+    serverExternalPackages: ["pg", "resend"],
   experimental: {
     serverActions: {
       bodySizeLimit: "21mb",

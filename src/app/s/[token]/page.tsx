@@ -140,10 +140,13 @@ export default function SupplierPortalPage() {
   }
 
   if (error) {
+    const expired = error.includes("expired");
     return (
       <div className="mx-auto min-h-full max-w-lg px-5 py-16">
         <SourceWordmark />
-        <h1 className="mt-10 font-[family-name:var(--font-space)] text-[28px] font-medium">This link is unavailable.</h1>
+        <h1 className="mt-10 font-[family-name:var(--font-space)] text-[28px] font-medium">
+          {expired ? "This request link has expired." : "This link is unavailable."}
+        </h1>
         <p className="mt-3 text-[13px] text-[#101A15]/65">{error}</p>
       </div>
     );

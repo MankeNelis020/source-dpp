@@ -18,6 +18,8 @@ export type RuntimeEnvironment = "local" | "preview" | "production";
 export type PersistenceAdapterKind = "memory" | "postgres";
 export type IdentityProviderKind = "supabase" | "test";
 export type ObjectStorageKind = "memory" | "supabase";
+export type EmailProviderKind = "test" | "resend";
+export type EmailMode = "test" | "live";
 
 export const DEFAULT_IMPORT_BUCKET = "source-imports";
 export const DEFAULT_EVIDENCE_BUCKET = "source-evidence";
@@ -54,6 +56,16 @@ export interface SourceEnvironment {
   evidenceBucket: string;
   signedReadTtlSeconds: number;
   tempUploadTtlHours: number;
+  emailProvider?: EmailProviderKind;
+  emailMode?: EmailMode;
+  resendApiKey?: string;
+  emailFrom?: string;
+  emailReplyTo?: string;
+  resendWebhookSecret?: string;
+  emailAllowedRecipients?: string[];
+  outboxBatchSize?: number;
+  outboxMaxAttempts?: number;
+  cronSecret?: string;
 }
 
 export type EnvMap = Record<string, string | undefined>;
@@ -84,6 +96,16 @@ export function loadSourceEnvironment(
   const evidenceBucket = trim(env.SOURCE_EVIDENCE_BUCKET) ?? DEFAULT_EVIDENCE_BUCKET;
   const signedReadTtlSeconds = positiveInt(env.SOURCE_SIGNED_READ_TTL_SECONDS, DEFAULT_SIGNED_READ_TTL_SECONDS);
   const tempUploadTtlHours = positiveInt(env.SOURCE_TEMP_UPLOAD_TTL_HOURS, DEFAULT_TEMP_UPLOAD_TTL_HOURS);
+  const emailFrom = trim(env.SOURCE_EMAIL_FROM);
+  const emailReplyTo = trim(env.SOURCE_EMAIL_REPLY_TO);
+  const resendApiKey = trim(env.RESEND_API_KEY);
+  const resendWebhookSecret = trim(env.RESEND_WEBHOOK_SECRET);
+  const cronSecret = trim(env.CRON_SECRET);
+  const emailAllowedRecipients = parseEmailList(env.SOURCE_EMAIL_ALLOWED_RECIPIENTS);
+  const outboxBatchSize = positiveInt(env.SOURCE_OUTBOX_BATCH_SIZE, 20);
+  const outboxMaxAttempts = positiveInt(env.SOURCE_OUTBOX_MAX_ATTEMPTS, 5);
+  const emailMode = resolveEmailMode(runtime, env);
+  const emailProvider = resolveEmailProvider(runtime, env, emailMode);
 
   assertProjectIsolation({
     runtime,
@@ -129,6 +151,16 @@ export function loadSourceEnvironment(
       evidenceBucket,
       signedReadTtlSeconds,
       tempUploadTtlHours,
+      emailProvider,
+      emailMode,
+      resendApiKey,
+      emailFrom,
+      emailReplyTo,
+      resendWebhookSecret,
+      emailAllowedRecipients,
+      outboxBatchSize,
+      outboxMaxAttempts,
+      cronSecret,
     };
   }
 
@@ -173,6 +205,17 @@ export function loadSourceEnvironment(
         "SOURCE environment configuration mismatch: SUPABASE_SERVICE_ROLE_KEY is required for object storage."
       );
     }
+    if (!appPublicUrl) {
+      throw new SourceEnvironmentError(
+        "SOURCE environment configuration mismatch: NEXT_PUBLIC_SOURCE_APP_URL is required."
+      );
+    }
+    if (!cronSecret) {
+      throw new SourceEnvironmentError(
+        "SOURCE environment configuration mismatch: CRON_SECRET is required."
+      );
+    }
+    assertEmailPolicy({ runtime, emailMode, emailProvider, resendApiKey, emailFrom, resendWebhookSecret, emailAllowedRecipients });
     assertAppRole(appDatabaseUrl);
   }
 
@@ -218,6 +261,16 @@ export function loadSourceEnvironment(
     evidenceBucket,
     signedReadTtlSeconds,
     tempUploadTtlHours,
+    emailProvider,
+    emailMode,
+    resendApiKey,
+    emailFrom,
+    emailReplyTo,
+    resendWebhookSecret,
+    emailAllowedRecipients,
+    outboxBatchSize,
+    outboxMaxAttempts,
+    cronSecret,
   };
 }
 
@@ -311,6 +364,88 @@ function resolveObjectStorageAdapter(runtime: RuntimeEnvironment, env: EnvMap): 
   }
   if (requested === "supabase") return "supabase";
   return "memory";
+}
+
+function resolveEmailMode(runtime: RuntimeEnvironment, env: EnvMap): EmailMode {
+  const requested = trim(env.SOURCE_EMAIL_MODE)?.toLowerCase();
+  if (requested && requested !== "test" && requested !== "live") {
+    throw new SourceEnvironmentError(
+      "SOURCE environment configuration mismatch: SOURCE_EMAIL_MODE must be test or live."
+    );
+  }
+  if (runtime === "production") {
+    if (requested === "test") {
+      throw new SourceEnvironmentError(
+        "SOURCE environment configuration mismatch: production cannot use SOURCE_EMAIL_MODE=test."
+      );
+    }
+    return "live";
+  }
+  if (requested === "live") return "live";
+  return "test";
+}
+
+function resolveEmailProvider(runtime: RuntimeEnvironment, env: EnvMap, mode: EmailMode): EmailProviderKind {
+  const requested = trim(env.SOURCE_EMAIL_PROVIDER)?.toLowerCase();
+  if (requested && requested !== "test" && requested !== "resend") {
+    throw new SourceEnvironmentError(
+      "SOURCE environment configuration mismatch: SOURCE_EMAIL_PROVIDER must be test or resend."
+    );
+  }
+  if (runtime === "production") {
+    if (requested === "test") {
+      throw new SourceEnvironmentError(
+        "SOURCE environment configuration mismatch: production cannot use the test email provider."
+      );
+    }
+    return "resend";
+  }
+  if (requested === "resend") return "resend";
+  if (runtime === "preview" && mode === "live") return "resend";
+  return "test";
+}
+
+function assertEmailPolicy(input: {
+  runtime: RuntimeEnvironment;
+  emailMode: EmailMode;
+  emailProvider: EmailProviderKind;
+  resendApiKey?: string;
+  emailFrom?: string;
+  resendWebhookSecret?: string;
+  emailAllowedRecipients: string[];
+}) {
+  if (input.runtime === "production") {
+    if (input.emailProvider !== "resend" || input.emailMode !== "live") {
+      throw new SourceEnvironmentError(
+        "SOURCE environment configuration mismatch: production email must use live Resend."
+      );
+    }
+    if (!input.resendApiKey || !input.emailFrom || !input.resendWebhookSecret) {
+      throw new SourceEnvironmentError(
+        "SOURCE environment configuration mismatch: RESEND_API_KEY, SOURCE_EMAIL_FROM, and RESEND_WEBHOOK_SECRET are required."
+      );
+    }
+  }
+  if (input.runtime === "preview" && input.emailMode === "live") {
+    if (!input.resendApiKey || !input.emailFrom || !input.resendWebhookSecret) {
+      throw new SourceEnvironmentError(
+        "SOURCE environment configuration mismatch: preview live email requires Resend configuration."
+      );
+    }
+    if (!input.emailAllowedRecipients.length) {
+      throw new SourceEnvironmentError(
+        "SOURCE environment configuration mismatch: preview live email requires SOURCE_EMAIL_ALLOWED_RECIPIENTS."
+      );
+    }
+  }
+}
+
+function parseEmailList(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(/[,\s]+/)
+    .map((item) => item.trim().toLowerCase())
+    .filter((item) => item.includes("@") && item.includes("."));
 }
 
 function resolvePersistenceAdapter(runtime: RuntimeEnvironment, env: EnvMap): PersistenceAdapterKind {

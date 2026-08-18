@@ -10,7 +10,14 @@ export async function resolvePortalPrincipal(store: PersistencePort, token: stri
   const grant = await store.findPortalGrantByTokenHash(hashToken(token));
   if (!grant) throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
   if (grant.revokedAt) throw new SourceError("REVOKED", "This link is no longer valid.", 401);
-  if (new Date(grant.expiresAt) <= now) throw new SourceError("EXPIRED", "This link has expired.", 401);
+  if (new Date(grant.expiresAt) <= now) {
+    const org = await store.getOrganisation(grant.tenantContextId);
+    throw new SourceError(
+      "EXPIRED",
+      `This request link has expired. Please ask ${org?.name ?? "the manufacturer"} to send a new link.`,
+      401
+    );
+  }
   return {
     kind: "supplier_portal",
     grantId: grant.id,
@@ -33,7 +40,7 @@ export async function issuePortalGrant(
     expiresAt: string;
   }
 ) {
-  await store.savePortalGrant({
+  const grant = {
     id: store.nextId("grant"),
     tokenHash: hashToken(input.token),
     actorId: input.actorId,
@@ -50,8 +57,10 @@ export async function issuePortalGrant(
       "REQUEST_CLARIFICATION",
       "MARK_UNKNOWN",
       "MARK_WRONG_CONTACT",
-    ],
+    ] as const,
     expiresAt: input.expiresAt,
     createdAt: new Date().toISOString(),
-  });
+  };
+  await store.savePortalGrant({ ...grant, allowedCommands: [...grant.allowedCommands] });
+  return grant;
 }

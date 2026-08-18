@@ -13,6 +13,14 @@ const SECRETS = {
   SOURCE_OPAQUE_REF_SECRET: "test-opaque-secret",
   NEXT_PUBLIC_SUPABASE_ANON_KEY: "test-anon-key-not-a-secret",
   SUPABASE_SERVICE_ROLE_KEY: "test-service-role-not-a-secret",
+  NEXT_PUBLIC_SOURCE_APP_URL: "https://app.example.test",
+  CRON_SECRET: "test-cron-secret-not-for-production",
+};
+
+const PRODUCTION_EMAIL = {
+  RESEND_API_KEY: "re_test_not_a_real_key",
+  SOURCE_EMAIL_FROM: "SOURCE <requests@mail.example.test>",
+  RESEND_WEBHOOK_SECRET: "whsec_dGVzdHNlY3JldA==",
 };
 
 const DEV_APP_URL = "postgres://source_app:not-a-real-secret@localhost:5432/postgres";
@@ -165,6 +173,7 @@ describe("SOURCE environment isolation", () => {
         NEXT_PUBLIC_SUPABASE_URL: PRODUCTION_SUPABASE_URL,
         SOURCE_APP_DATABASE_URL: PROD_APP_URL,
         ...SECRETS,
+        ...PRODUCTION_EMAIL,
       }).runtime
     ).toBe("production");
   });
@@ -243,5 +252,43 @@ describe("SOURCE environment isolation", () => {
     });
     expect(env.objectStorage).toBe("supabase");
     expect(env.importBucket).toBe("source-imports");
+  });
+
+  it("defaults preview email to test mode and refuses live preview without an allow list", () => {
+    const preview = loadSourceEnvironment({
+      SOURCE_ENV: "preview",
+      NEXT_PUBLIC_SUPABASE_URL: DEV_PREVIEW_SUPABASE_URL,
+      SOURCE_APP_DATABASE_URL: DEV_APP_URL,
+      ...SECRETS,
+    });
+    expect(preview.emailMode).toBe("test");
+    expect(preview.emailProvider).toBe("test");
+    expectConfigError(
+      () =>
+        loadSourceEnvironment({
+          SOURCE_ENV: "preview",
+          NEXT_PUBLIC_SUPABASE_URL: DEV_PREVIEW_SUPABASE_URL,
+          SOURCE_APP_DATABASE_URL: DEV_APP_URL,
+          SOURCE_EMAIL_MODE: "live",
+          ...SECRETS,
+          ...PRODUCTION_EMAIL,
+        }),
+      /SOURCE_EMAIL_ALLOWED_RECIPIENTS/
+    );
+  });
+
+  it("refuses production SOURCE_EMAIL_MODE=test", () => {
+    expectConfigError(
+      () =>
+        loadSourceEnvironment({
+          SOURCE_ENV: "production",
+          NEXT_PUBLIC_SUPABASE_URL: PRODUCTION_SUPABASE_URL,
+          SOURCE_APP_DATABASE_URL: PROD_APP_URL,
+          SOURCE_EMAIL_MODE: "test",
+          ...SECRETS,
+          ...PRODUCTION_EMAIL,
+        }),
+      /production cannot use SOURCE_EMAIL_MODE=test/
+    );
   });
 });

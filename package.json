@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run --exclude src/server/source/p01-postgres.test.ts --exclude src/server/source/b1-runtime-persistence.test.ts --exclude src/server/source/b2-storage-postgres.test.ts",
-    "test:postgres": "vitest run --fileParallelism=false src/server/source/p01-postgres.test.ts src/server/source/b1-runtime-persistence.test.ts src/server/source/b2-storage-postgres.test.ts",
+    "test:postgres": "vitest run --fileParallelism=false src/server/source/p01-postgres.test.ts src/server/source/b1-runtime-persistence.test.ts src/server/source/b2-storage-postgres.test.ts src/server/source/c-email-postgres.test.ts",
     "db:migrate": "tsx src/infrastructure/database/migrate-cli.ts",
     "db:seed": "tsx src/infrastructure/database/seed-cli.ts",
     "storage:bootstrap": "tsx src/infrastructure/storage/bootstrap.ts",
@@ -22,6 +22,7 @@
     "pg": "^8.16.3",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "resend": "^6.20.0",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {

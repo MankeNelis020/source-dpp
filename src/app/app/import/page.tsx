@@ -168,7 +168,14 @@ export default function ImportWizardPage() {
           <div className="mt-6 flex flex-wrap gap-2">
             <SourceButton
               onClick={() =>
-                void api("/api/source/resolution-run", { method: "POST", body: "{}" }).then(() => router.push("/app/pilot"))
+                void api<{ emailsQueued?: number }>("/api/source/resolution-run", { method: "POST", body: "{}" }).then((result) => {
+                  setStatus(
+                    result.emailsQueued
+                      ? "Request queued. SOURCE will email suppliers shortly."
+                      : "SOURCE is working the gaps. No new supplier email was needed."
+                  );
+                  router.push("/app/pilot");
+                })
               }
             >
               Let SOURCE handle the gaps

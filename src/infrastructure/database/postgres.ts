@@ -4,6 +4,7 @@ import type { EngineState, PermissionState, Purpose, TrustLevel } from "@/domain
 import { emptyState, hydrateEngineState } from "@/domain/source";
 import { hashesEqual } from "@/infrastructure/crypto/tokens";
 import type { OutboxRecord, OutboxStatus } from "@/infrastructure/outbox/types";
+import type { EmailProviderEventRecord, OutboundMessageRecord, TransportStatus } from "@/infrastructure/email/transport";
 import type {
   ImmutableAuditEvent,
   ImportJob,
@@ -764,6 +765,125 @@ export class PostgresPersistence implements PersistencePort {
     return rows[0]?.n ?? 0;
   }
 
+  async updateOutboxPayload(id: string, payload: Record<string, unknown>) {
+    await this.q("SELECT update_outbox_payload($1, $2::jsonb)", [id, JSON.stringify(payload)]);
+  }
+
+  async resetOutboxForRetry(id: string, availableAt = new Date()) {
+    const { rows } = await this.q("SELECT reset_outbox_for_retry($1, $2::timestamptz) AS ok", [
+      id,
+      availableAt.toISOString(),
+    ]);
+    return Boolean(rows[0]?.ok);
+  }
+
+  async saveOutboundMessage(record: OutboundMessageRecord) {
+    await this.withTenant(record.organisationId, async (client) => {
+      await client.query(
+        `INSERT INTO outbound_messages (
+           id, organisation_id, case_id, request_id, supplier_actor_id, portal_grant_id, outbox_event_id,
+           semantic_key, recipient, from_address, template_id, template_version, category, provider,
+           provider_message_id, transport_status, token_fingerprint, created_at, provider_accepted_at,
+           delivered_at, bounced_at, complained_at, last_provider_event_at, last_error
+         ) VALUES (
+           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24
+         )
+         ON CONFLICT (id) DO UPDATE SET
+           provider_message_id = EXCLUDED.provider_message_id,
+           transport_status = EXCLUDED.transport_status,
+           provider_accepted_at = EXCLUDED.provider_accepted_at,
+           delivered_at = EXCLUDED.delivered_at,
+           bounced_at = EXCLUDED.bounced_at,
+           complained_at = EXCLUDED.complained_at,
+           last_provider_event_at = EXCLUDED.last_provider_event_at,
+           last_error = EXCLUDED.last_error,
+           portal_grant_id = EXCLUDED.portal_grant_id`,
+        [
+          record.id,
+          record.organisationId,
+          record.caseId ?? null,
+          record.requestId ?? null,
+          record.supplierActorId ?? null,
+          record.portalGrantId ?? null,
+          record.outboxEventId,
+          record.semanticKey,
+          record.recipient,
+          record.fromAddress,
+          record.templateId,
+          record.templateVersion,
+          record.category,
+          record.provider,
+          record.providerMessageId ?? null,
+          record.transportStatus,
+          record.tokenFingerprint ?? null,
+          record.createdAt,
+          record.providerAcceptedAt ?? null,
+          record.deliveredAt ?? null,
+          record.bouncedAt ?? null,
+          record.complainedAt ?? null,
+          record.lastProviderEventAt ?? null,
+          record.lastError ?? null,
+        ]
+      );
+    });
+  }
+
+  async getOutboundMessage(id: string) {
+    const { rows } = await this.q("SELECT * FROM find_outbound_message_by_id($1)", [id]);
+    return rows[0] ? mapOutboundMessage(rows[0]) : undefined;
+  }
+
+  async getOutboundMessageBySemanticKey(organisationId: string, semanticKey: string) {
+    return this.withTenant(organisationId, async (client) => {
+      const { rows } = await client.query(
+        "SELECT * FROM outbound_messages WHERE organisation_id = $1 AND semantic_key = $2",
+        [organisationId, semanticKey]
+      );
+      return rows[0] ? mapOutboundMessage(rows[0]) : undefined;
+    });
+  }
+
+  async getOutboundMessageByProviderId(provider: string, providerMessageId: string) {
+    const { rows } = await this.q("SELECT * FROM find_outbound_message_by_provider_id($1, $2)", [
+      provider,
+      providerMessageId,
+    ]);
+    return rows[0] ? mapOutboundMessage(rows[0]) : undefined;
+  }
+
+  async listOutboundMessages(organisationId: string, caseId?: string) {
+    return this.withTenant(organisationId, async (client) => {
+      const { rows } = await client.query(
+        "SELECT * FROM outbound_messages WHERE organisation_id = $1 AND ($2::text IS NULL OR case_id = $2) ORDER BY created_at",
+        [organisationId, caseId ?? null]
+      );
+      return rows.map((row) => mapOutboundMessage(row));
+    });
+  }
+
+  async insertEmailProviderEvent(record: EmailProviderEventRecord) {
+    const { rows } = await this.q(
+      "SELECT insert_email_provider_event($1,$2,$3,$4,$5,$6,$7,$8::timestamptz,$9::timestamptz) AS ok",
+      [
+        record.id,
+        record.organisationId ?? null,
+        record.outboundMessageId ?? null,
+        record.provider,
+        record.providerEventId,
+        record.providerMessageId ?? null,
+        record.eventType,
+        record.occurredAt,
+        record.processedAt,
+      ]
+    );
+    return Boolean(rows[0]?.ok);
+  }
+
+  async getEmailProviderEvent(provider: string, providerEventId: string) {
+    const { rows } = await this.q("SELECT * FROM find_email_provider_event($1, $2)", [provider, providerEventId]);
+    return rows[0] ? mapProviderEvent(rows[0]) : undefined;
+  }
+
   async saveSession(session: SessionRecord) {
     await this.withTenant(session.organisationId, async (client) => {
       await client.query(
@@ -898,5 +1018,58 @@ function mapOutbox(row: Record<string, unknown>): OutboxRecord {
     lastError: (row.last_error ?? row.lastError) as string | undefined,
     createdAt: new Date(String(row.created_at ?? row.createdAt)).toISOString(),
     processedAt: row.processed_at || row.processedAt ? new Date(String(row.processed_at ?? row.processedAt)).toISOString() : undefined,
+  };
+}
+
+function mapOutboundMessage(row: Record<string, unknown>): OutboundMessageRecord {
+  return {
+    id: String(row.id),
+    organisationId: String(row.organisation_id ?? row.organisationId),
+    caseId: (row.case_id ?? row.caseId) as string | undefined,
+    requestId: (row.request_id ?? row.requestId) as string | undefined,
+    supplierActorId: (row.supplier_actor_id ?? row.supplierActorId) as string | undefined,
+    portalGrantId: (row.portal_grant_id ?? row.portalGrantId) as string | undefined,
+    outboxEventId: String(row.outbox_event_id ?? row.outboxEventId),
+    semanticKey: String(row.semantic_key ?? row.semanticKey),
+    recipient: String(row.recipient),
+    fromAddress: String(row.from_address ?? row.fromAddress),
+    templateId: String(row.template_id ?? row.templateId) as OutboundMessageRecord["templateId"],
+    templateVersion: String(row.template_version ?? row.templateVersion),
+    category: String(row.category),
+    provider: String(row.provider) as OutboundMessageRecord["provider"],
+    providerMessageId: (row.provider_message_id ?? row.providerMessageId) as string | undefined,
+    transportStatus: String(row.transport_status ?? row.transportStatus) as TransportStatus,
+    tokenFingerprint: (row.token_fingerprint ?? row.tokenFingerprint) as string | undefined,
+    createdAt: new Date(String(row.created_at ?? row.createdAt)).toISOString(),
+    providerAcceptedAt: row.provider_accepted_at || row.providerAcceptedAt
+      ? new Date(String(row.provider_accepted_at ?? row.providerAcceptedAt)).toISOString()
+      : undefined,
+    deliveredAt: row.delivered_at || row.deliveredAt
+      ? new Date(String(row.delivered_at ?? row.deliveredAt)).toISOString()
+      : undefined,
+    bouncedAt: row.bounced_at || row.bouncedAt
+      ? new Date(String(row.bounced_at ?? row.bouncedAt)).toISOString()
+      : undefined,
+    complainedAt: row.complained_at || row.complainedAt
+      ? new Date(String(row.complained_at ?? row.complainedAt)).toISOString()
+      : undefined,
+    lastProviderEventAt: row.last_provider_event_at || row.lastProviderEventAt
+      ? new Date(String(row.last_provider_event_at ?? row.lastProviderEventAt)).toISOString()
+      : undefined,
+    lastError: (row.last_error ?? row.lastError) as string | undefined,
+  };
+}
+
+function mapProviderEvent(row: Record<string, unknown>): EmailProviderEventRecord {
+  return {
+    id: String(row.id),
+    organisationId: (row.organisation_id ?? row.organisationId) as string | undefined,
+    outboundMessageId: (row.outbound_message_id ?? row.outboundMessageId) as string | undefined,
+    provider: String(row.provider) as EmailProviderEventRecord["provider"],
+    providerEventId: String(row.provider_event_id ?? row.providerEventId),
+    providerMessageId: (row.provider_message_id ?? row.providerMessageId) as string | undefined,
+    eventType: String(row.event_type ?? row.eventType),
+    occurredAt: new Date(String(row.occurred_at ?? row.occurredAt)).toISOString(),
+    processedAt: new Date(String(row.processed_at ?? row.processedAt)).toISOString(),
   };
 }

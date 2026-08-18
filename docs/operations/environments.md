@@ -76,7 +76,7 @@ Local explicit Postgres: `SOURCE_PERSISTENCE=postgres` plus `SOURCE_APP_DATABASE
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL. Required in preview and production. Not a secret. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Required in preview and production. Client-safe Auth anon key. |
-| `NEXT_PUBLIC_SOURCE_APP_URL` | Public app origin for Auth redirects (preview vs production). |
+| `NEXT_PUBLIC_SOURCE_APP_URL` | Public app origin for Auth redirects and **supplier portal links in email** (preview vs production). Never derived from the request Host header. |
 
 ### Server-only (never put in client bundles)
 
@@ -97,6 +97,16 @@ Local explicit Postgres: `SOURCE_PERSISTENCE=postgres` plus `SOURCE_APP_DATABASE
 | `SOURCE_INVITATION_TTL_DAYS` | Application runtime | Invitation expiry. Default `7`. |
 | `SOURCE_EXPOSE_INVITE_LINKS` | Local only | Returns invite URLs for tests. Never set in preview/production. |
 | `SOURCE_ENV` | Process | `local` \| `preview` \| `production` |
+| `CRON_SECRET` | Application runtime | Bearer secret for `/api/internal/outbox/process` and related worker routes. Required in preview/production. |
+| `RESEND_API_KEY` | `ResendEmailAdapter` only | Server-only. Required in production. Preview only if `SOURCE_EMAIL_MODE=live`. |
+| `RESEND_WEBHOOK_SECRET` | Webhook route | Svix signing secret. Required in production. |
+| `SOURCE_EMAIL_FROM` | Application runtime | Verified SOURCE From address. |
+| `SOURCE_EMAIL_REPLY_TO` | Application runtime | Optional support mailbox. No inbound parsing. |
+| `SOURCE_EMAIL_MODE` | Process | `test` \| `live`. Preview defaults to `test`. Production is always `live`. |
+| `SOURCE_EMAIL_PROVIDER` | Process | `test` \| `resend`. Production is always `resend`. |
+| `SOURCE_EMAIL_ALLOWED_RECIPIENTS` | Preview live | Comma-separated allow list. Required if preview is `live`. Production never rewrites recipients. |
+| `SOURCE_OUTBOX_BATCH_SIZE` | Worker | Default `20`. |
+| `SOURCE_OUTBOX_MAX_ATTEMPTS` | Worker | Default `5`. |
 | `SOURCE_PERSISTENCE` | Local only | `memory` \| `postgres`. Rejected in preview/production if `memory`. |
 | `SOURCE_PG_POOL_MAX` | Application runtime | Optional pg pool size. Default `3`. |
 
@@ -132,6 +142,8 @@ SUPABASE_SERVICE_ROLE_KEY=<Preview project service role>
 SOURCE_IMPORT_BUCKET=source-imports
 SOURCE_EVIDENCE_BUCKET=source-evidence
 SOURCE_SIGNED_READ_TTL_SECONDS=300
+CRON_SECRET=<preview secret>
+SOURCE_EMAIL_MODE=test
 ```
 
 `SOURCE_MIGRATOR_DATABASE_URL` belongs in the migrate/deploy job, not necessarily in the serverless runtime.
@@ -151,6 +163,12 @@ SUPABASE_SERVICE_ROLE_KEY=<Production project service role>
 SOURCE_IMPORT_BUCKET=source-imports
 SOURCE_EVIDENCE_BUCKET=source-evidence
 SOURCE_SIGNED_READ_TTL_SECONDS=300
+CRON_SECRET=<production secret>
+SOURCE_EMAIL_MODE=live
+SOURCE_EMAIL_PROVIDER=resend
+RESEND_API_KEY=<production Resend key>
+RESEND_WEBHOOK_SECRET=<production webhook secret>
+SOURCE_EMAIL_FROM=<verified production sender>
 ```
 
 Again: migrator DSN in the migrate job only.
@@ -213,7 +231,7 @@ If preview/production cannot reach Postgres, SOURCE does not switch to memory.
 Safe health payload (`GET /api/health`):
 
 ```json
-{ "database": "ok", "persistence": "postgres", "storage": "ok" }
+{ "database": "ok", "persistence": "postgres", "storage": "ok", "email": "configured" }
 ```
 
 No DSNs, roles, bucket secrets, or service-role material. Storage `error` is reported; it does not by itself mark evidence invalid. Database failure still returns 503.
@@ -231,7 +249,8 @@ Persisted in Postgres:
 - ImportJob metadata, mapping, parsed `raw_records`, import events
 - Processed commands (idempotency)
 - Structured audit
-- Outbox (pending mail stays pending; Resend is not in this PR)
+- Outbox (pending mail stays pending until the worker sends)
+- Outbound message transport records and provider webhook events
 - Portal grants, sessions
 
 **Durable in B2 (private Storage + Postgres index):**
@@ -242,7 +261,7 @@ Persisted in Postgres:
 
 Postgres backup alone does not restore Storage bytes. See `docs/architecture/storage.md`.
 
-Email remains outbox-only. Resend is PR C.
+**PR C:** supplier email goes through `EmailProvider` / Resend after outbox commit. See `docs/architecture/email-and-communication.md` and `docs/operations/email.md`.
 
 Demo HMAC login is **removed**. Preview/production use Supabase Auth (`SupabaseIdentityProvider`). Local/CI may use `TestIdentityProvider`. Tenant context still comes from membership rows, never from browser `organisationId` or `user_metadata`.
 
@@ -279,7 +298,8 @@ Migrations create `source_app` and RLS when applied with migrator credentials. A
 8. Never copy production DSNs into Preview, and never point CI at Supabase.
 9. Put **this environment's** `SUPABASE_SERVICE_ROLE_KEY` in Vercel (Preview key from preview project, Production key from production project). Never mix.
 10. Create private buckets `source-imports` and `source-evidence` (`npm run storage:bootstrap` or dashboard). They must not be public.
+11. Place Resend keys, webhook secret, From address, and `CRON_SECRET` per environment. Preview stays `SOURCE_EMAIL_MODE=test` unless an allow list is intentional. See `docs/operations/email.md`.
 
-Until hosted Storage secrets and buckets exist, CI uses `MemoryObjectStorage`. Live preview/production file upload is blocked on that human placement — not on application code.
+Until hosted Resend credentials and a verified domain exist, CI uses `TestEmailProvider`. Live preview/production sending is blocked on that human placement — not on application code.
 
 See `docs/architecture/storage.md` and `docs/security/data-inventory.md`.

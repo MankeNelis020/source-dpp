@@ -828,9 +828,9 @@ function markBounce(
   state.tasks.push({
     id: id(state, "task"),
     caseId,
-    title: `Find a working contact for ${state.actors.find((a) => a.id === resolution.currentActorId)?.name ?? "this supplier"}.`,
-    context: "The last email bounced. SOURCE stopped waiting for the deadline.",
-    recommendedAction: "Add a product-data or compliance mailbox.",
+    title: "We couldn't reach this supplier",
+    context: `${state.actors.find((a) => a.id === resolution.currentActorId)?.name ?? "This supplier"}\nThe email was rejected by the recipient's mail server. This is not supplier non-response.`,
+    recommendedAction: "Add another contact",
     ownerLabel: "Account owner",
     status: "open",
     createdAt: iso(now),

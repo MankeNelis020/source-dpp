@@ -4,6 +4,7 @@ import type { CaseFilter, EngineState, ResolutionCase, ResolutionCaseState } fro
 import { matchesFilter } from "@/domain/source/queries";
 import { evaluatePilotRun, humanPilotSentences } from "@/domain/source/analytics";
 import type { PersistencePort } from "@/infrastructure/database/ports";
+import { humanTransportLabel } from "@/infrastructure/email/transport";
 import { hasCapability } from "./authorization";
 import { isConfidentialActor, projectActor, projectEvidenceForState, safeActorLabel } from "./confidentiality";
 import { evaluateEvidenceDisclosure, hasEvidenceByteAccess, opaqueEvidenceRef, resolveEvidenceIdFromOpaqueRef } from "./disclosure";
@@ -50,6 +51,28 @@ export interface NeedsYouTask {
 
 function loadTenant(store: PersistencePort, principal: Principal): Promise<EngineState> | EngineState {
   return store.loadEngine(principal.organisationId);
+}
+
+async function projectDelivery(store: PersistencePort, organisationId: string, state: EngineState, caseId: string) {
+  const messages = await store.listOutboundMessages(organisationId, caseId);
+  const latest = messages[messages.length - 1];
+  if (!latest) return undefined;
+  const confidential = latest.supplierActorId ? isConfidentialActor(state, latest.supplierActorId) : false;
+  const request = state.requests.find((r) => r.caseId === caseId);
+  return {
+    status: latest.transportStatus,
+    label: confidential && (latest.transportStatus === "DELIVERED" || latest.transportStatus === "PROVIDER_ACCEPTED")
+      ? "Waiting on verified upstream source"
+      : humanTransportLabel(latest.transportStatus),
+    queuedAt: latest.createdAt,
+    providerAcceptedAt: latest.providerAcceptedAt,
+    deliveredAt: confidential ? undefined : latest.deliveredAt,
+    bouncedAt: confidential ? undefined : latest.bouncedAt,
+    nextReminderAt: request && latest.transportStatus !== "BOUNCED" && latest.transportStatus !== "COMPLAINED"
+      ? state.cases.find((c) => c.id === caseId)?.nextActionAt
+      : undefined,
+    recipient: confidential ? undefined : latest.recipient,
+  };
 }
 
 export async function getWorkspaceOverview(store: PersistencePort, principal: Principal) {
@@ -176,6 +199,7 @@ export async function getCaseDetail(store: PersistencePort, principal: Principal
     request: state.requests
       .filter((r) => r.caseId === caseId)
       .map((r) => ({ id: r.id, status: r.status, dueAt: r.dueAt, reminderCount: r.reminderCount }))[0],
+    delivery: await projectDelivery(store, principal.organisationId, state, caseId),
     attempts: state.attempts
       .filter((a) => a.caseId === caseId)
       .map((a) => ({

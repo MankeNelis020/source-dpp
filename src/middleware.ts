@@ -18,6 +18,8 @@ const PUBLIC_PREFIXES = [
   "/api/health",
   "/api/auth/",
   "/api/session",
+  "/api/webhooks/",
+  "/api/internal/",
 ];
 
 function isPublicPath(pathname: string) {

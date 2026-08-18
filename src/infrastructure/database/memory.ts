@@ -5,6 +5,7 @@ import { hashToken, hashesEqual } from "@/infrastructure/crypto/tokens";
 import type { OutboxRecord, OutboxStatus } from "@/infrastructure/outbox/types";
 import { PORTAL_ALLOWED_DEFAULT, type ImportJob, type ImportJobEvent, type ImportMappingProfile, type ImmutableAuditEvent, type IdentityCommandRecord, type Membership, type Organisation, type OrganisationInvitation, type ProcessedCommand, type SupplierPortalGrant, type UserRecord } from "@/server/source/types";
 import type { EvidenceObject, PersistencePort, SessionRecord, ShareableTrustCandidate, StorageObjectRecord } from "./ports";
+import type { EmailProviderEventRecord, OutboundMessageRecord } from "@/infrastructure/email/transport";
 
 const DEMO_EXPIRY = "2027-08-17T00:00:00.000Z";
 
@@ -118,6 +119,8 @@ export class MemoryPersistence implements PersistencePort {
   evidence = new Map<string, EvidenceObject>();
   storageObjects = new Map<string, StorageObjectRecord>();
   outbox: OutboxRecord[] = [];
+  outboundMessages: OutboundMessageRecord[] = [];
+  emailProviderEvents: EmailProviderEventRecord[] = [];
   sessions = new Map<string, SessionRecord>();
   invitations = new Map<string, OrganisationInvitation>();
   identityCommands = new Map<string, IdentityCommandRecord>();
@@ -224,6 +227,8 @@ export class MemoryPersistence implements PersistencePort {
     this.evidence.clear();
     this.storageObjects.clear();
     this.outbox = [];
+    this.outboundMessages = [];
+    this.emailProviderEvents = [];
     this.sessions.clear();
     this.invitations.clear();
     this.identityCommands.clear();
@@ -452,6 +457,68 @@ export class MemoryPersistence implements PersistencePort {
 
   countOutbox(status: OutboxStatus) {
     return this.outbox.filter((row) => row.status === status).length;
+  }
+
+  updateOutboxPayload(id: string, payload: Record<string, unknown>) {
+    const row = this.outbox.find((item) => item.id === id);
+    if (row) row.payload = { ...payload };
+  }
+
+  resetOutboxForRetry(id: string, availableAt = new Date()) {
+    const row = this.outbox.find((item) => item.id === id);
+    if (!row || row.status !== "DEAD_LETTER") return false;
+    row.status = "PENDING";
+    row.availableAt = availableAt.toISOString();
+    row.lastError = undefined;
+    row.processedAt = undefined;
+    return true;
+  }
+
+  saveOutboundMessage(record: OutboundMessageRecord) {
+    const idx = this.outboundMessages.findIndex((row) => row.id === record.id);
+    if (idx >= 0) this.outboundMessages[idx] = { ...record };
+    else this.outboundMessages.push({ ...record });
+  }
+
+  getOutboundMessage(id: string) {
+    const row = this.outboundMessages.find((item) => item.id === id);
+    return row ? { ...row } : undefined;
+  }
+
+  getOutboundMessageBySemanticKey(organisationId: string, semanticKey: string) {
+    const row = this.outboundMessages.find(
+      (item) => item.organisationId === organisationId && item.semanticKey === semanticKey
+    );
+    return row ? { ...row } : undefined;
+  }
+
+  getOutboundMessageByProviderId(provider: string, providerMessageId: string) {
+    const row = this.outboundMessages.find(
+      (item) => item.provider === provider && item.providerMessageId === providerMessageId
+    );
+    return row ? { ...row } : undefined;
+  }
+
+  listOutboundMessages(organisationId: string, caseId?: string) {
+    return this.outboundMessages
+      .filter((row) => row.organisationId === organisationId && (!caseId || row.caseId === caseId))
+      .map((row) => ({ ...row }));
+  }
+
+  insertEmailProviderEvent(record: EmailProviderEventRecord) {
+    const exists = this.emailProviderEvents.some(
+      (row) => row.provider === record.provider && row.providerEventId === record.providerEventId
+    );
+    if (exists) return false;
+    this.emailProviderEvents.push({ ...record });
+    return true;
+  }
+
+  getEmailProviderEvent(provider: string, providerEventId: string) {
+    const row = this.emailProviderEvents.find(
+      (item) => item.provider === provider && item.providerEventId === providerEventId
+    );
+    return row ? { ...row } : undefined;
   }
 
   saveSession(session: SessionRecord) {

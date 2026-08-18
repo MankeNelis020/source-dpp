@@ -255,7 +255,7 @@ describe("outbox semantic idempotency", () => {
     const result = await processOutboxBatch({ store, email, now: NOW });
     expect(result.deadLetters).toContain("obx-fail");
     expect(store.getOutbox("obx-fail")?.status).toBe("DEAD_LETTER");
-    expect(store.loadEngine("acme").tasks.some((task) => task.title.includes("could not be delivered"))).toBe(true);
+    expect(store.loadEngine("acme").tasks.some((task) => task.title.includes("couldn't reach this supplier"))).toBe(true);
   });
 });
 
