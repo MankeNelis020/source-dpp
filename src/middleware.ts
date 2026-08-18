@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { refreshSupabaseAuth } from "@/infrastructure/auth/supabase/middleware";
+import { refreshSupabaseAuth, shouldRefreshSupabaseAuth } from "@/infrastructure/auth/supabase/middleware";
 import { loadSourceEnvironment } from "@/infrastructure/environment/source-environment";
+import { isSupabaseSessionCookieName } from "@/infrastructure/auth/supabase/pkce";
 
 const PUBLIC_PREFIXES = [
   "/login",
@@ -29,14 +30,14 @@ function isPublicPath(pathname: string) {
 
 function hasAuthHint(request: NextRequest) {
   if (request.cookies.get("source_test_identity")?.value) return true;
-  return request.cookies.getAll().some((cookie) => cookie.name.includes("-auth-token"));
+  return request.cookies.getAll().some((cookie) => isSupabaseSessionCookieName(cookie.name));
 }
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
   try {
     const env = loadSourceEnvironment();
-    if (env.identityProvider === "supabase") {
+    if (env.identityProvider === "supabase" && shouldRefreshSupabaseAuth(request.nextUrl.pathname)) {
       response = await refreshSupabaseAuth(request);
     }
   } catch {
