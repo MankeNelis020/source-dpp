@@ -2,7 +2,9 @@
 
 The Missing Information Engine. Connect your product system. SOURCE detects what is missing, finds who probably knows, reuses what it can, asks only for the rest, and does not stop at `REQUEST SENT`.
 
-This repository is the discovery clickable flow: public site, onboarding, manufacturer workspace, and supplier magic-link portal. Resolution cases now cover the MVP unhappy flows — no response, wrong contact, I don't know, ask my supplier, confidential upstream, declined, missing/expired/conflicting evidence, identity uncertainty, authorization, permission denied, unreachable supplier, manual escalation, and an explicit UNRESOLVED end state.
+This repository is a strangler migration of the Missing Information Engine: domain behaviour stays in `src/domain/source`, while business truth, authorization, and persistence live in `src/server/source`. The browser consumes authorized projections — not the full engine state.
+
+See `docs/architecture/p0-production.md` for the P0 audit, schema, threat model, and test plan.
 
 ```bash
 npm install

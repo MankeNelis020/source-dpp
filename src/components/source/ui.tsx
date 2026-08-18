@@ -202,6 +202,7 @@ export function SourceButton({
   className,
   type,
   onClick,
+  disabled,
 }: {
   href?: string;
   children: React.ReactNode;
@@ -209,6 +210,7 @@ export function SourceButton({
   className?: string;
   type?: "button" | "submit";
   onClick?: () => void;
+  disabled?: boolean;
 }) {
   const styles = {
     primary:
@@ -221,6 +223,7 @@ export function SourceButton({
   const cls = cn(
     "inline-flex items-center justify-center gap-2 rounded-sm px-4 py-2.5 text-[13px] font-medium transition-colors",
     styles[variant],
+    disabled && "pointer-events-none opacity-40",
     className
   );
   if (href) {
@@ -231,7 +234,7 @@ export function SourceButton({
     );
   }
   return (
-    <button type={type ?? "button"} className={cls} onClick={onClick}>
+    <button type={type ?? "button"} className={cls} onClick={onClick} disabled={disabled}>
       {children}
     </button>
   );

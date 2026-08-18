@@ -1,4 +1,5 @@
 import type { ClaimRecord, EvidenceRecord, InformationRequirement, PermissionGrant, ReuseOutcome } from "./types";
+import { evaluatePermission } from "./permissions";
 import { trustMeets } from "./readiness";
 
 export function evaluateReuse(args: {
@@ -24,14 +25,29 @@ export function evaluateReuse(args: {
     return "NONE";
   }
 
-  const state = args.permission?.state ?? args.claim.permissionState;
-  if (state === "UNKNOWN") return "PRIVATE";
-  if (state === "DENIED" || state === "REVOKED") return "PRIVATE";
-  if (state === "EXPIRED") return "EXPIRED";
-  if (state === "REQUEST_REQUIRED" || state === "REQUESTED") return "AUTHORIZATION_REQUIRED";
-  if (args.permission?.visibility === "verification_only") return "VERIFICATION_ONLY_AVAILABLE";
-  if (state === "GRANTED" || state === "NOT_REQUIRED" || state === "RESTRICTED") return "READY";
-  return "AUTHORIZATION_REQUIRED";
+  const stored = args.permission?.state ?? args.claim.permissionState;
+  if (args.permission?.visibility === "verification_only" || args.permission?.visibility === "VERIFICATION_ONLY") {
+    if (stored === "GRANTED" || stored === "NOT_REQUIRED") return "VERIFICATION_ONLY_AVAILABLE";
+  }
+  const decision = evaluatePermission({
+    storedState: stored,
+    visibility: args.permission?.visibility,
+    permissionRequired: true,
+    requestingOrganisationId: args.permission?.granteeActorId ?? args.claim.declaredByActorId,
+    granteeActorId: args.permission?.granteeActorId,
+    purpose: args.requirement.purpose,
+    grantPurpose: args.permission?.purpose,
+    now: args.now,
+    validFrom: args.permission?.validFrom,
+    validUntil: args.permission?.validUntil,
+    revokedAt: args.permission?.revokedAt,
+  });
+  if (decision === "DENY") return stored === "EXPIRED" ? "EXPIRED" : "PRIVATE";
+  if (decision === "AUTHORIZATION_REQUIRED") {
+    if (stored === "UNKNOWN" || stored === "DENIED" || stored === "REVOKED") return "PRIVATE";
+    return "AUTHORIZATION_REQUIRED";
+  }
+  return "READY";
 }
 
 export function findActiveDuplicate(args: {

@@ -17,8 +17,7 @@ import {
   SourceLabel,
   StatusPill,
 } from "@/components/source/ui";
-import { productBlockers } from "@/domain/source/queries";
-import { useEngineState } from "@/domain/source/store";
+import { useDispatchCommand, useSourceQuery } from "@/client/source/api";
 
 const TABS = ["Overview", "Components", "Claims", "Evidence", "History"] as const;
 
@@ -27,11 +26,18 @@ export default function ProductDetailPage() {
   const product = productById(params.id);
   const [tab, setTab] = useState<(typeof TABS)[number]>("Overview");
   const [openClaim, setOpenClaim] = useState<string | null>(null);
-  const engine = useEngineState();
+  const [materialName, setMaterialName] = useState("");
+  const dispatch = useDispatchCommand();
+  const { data: live } = useSourceQuery<{
+    id: string;
+    name: string;
+    children: { id: string; name: string; kind?: string; source?: string; confidence?: number }[];
+    blockers: { caseId: string; property: string; actorLabel: string; reason?: string; state: string }[];
+  }>(`/api/source/products/${params.id}`);
   if (!product) notFound();
   const claims = claimsForProduct(product.id);
   const selected = claims.find((c) => c.id === openClaim);
-  const blockers = productBlockers(engine, product.id);
+  const blockers = live?.blockers ?? [];
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -90,24 +96,44 @@ export default function ProductDetailPage() {
           {tab === "Overview" || tab === "Components" ? (
             <div className="font-[family-name:var(--font-plex)] text-[13px] leading-8">
               <div>{product.name}</div>
-              {(product.id === "urban-chair-04" ? URBAN_CHAIR_COMPONENTS : URBAN_CHAIR_COMPONENTS.slice(0, 2)).map(
-                (c) => (
-                  <div key={c.id} className="border-l border-[#101A15]/12 pl-4">
-                    ├── {c.name}{" "}
-                    <StatusPill
-                      tone={
-                        c.status === "ready"
-                          ? "signal"
-                          : c.status === "missing"
-                            ? "attention"
-                            : "teal"
-                      }
-                    >
-                      {c.label}
-                    </StatusPill>
-                  </div>
-                )
-              )}
+              {(live?.children?.length
+                ? live.children.map((c) => ({ id: c.id, name: c.name, status: "ready" as const, label: c.source ?? c.kind ?? "" }))
+                : product.id === "urban-chair-04"
+                  ? URBAN_CHAIR_COMPONENTS
+                  : URBAN_CHAIR_COMPONENTS.slice(0, 2)
+              ).map((c) => (
+                <div key={c.id} className="border-l border-[#101A15]/12 pl-4">
+                  ├── {c.name}{" "}
+                  <StatusPill tone={"status" in c && c.status === "missing" ? "attention" : "teal"}>
+                    {"label" in c ? c.label : ""}
+                  </StatusPill>
+                </div>
+              ))}
+              <form
+                className="mt-6 space-y-2 border border-[#101A15]/10 bg-[#FBFCFA] p-4"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!materialName.trim()) return;
+                  void dispatch({
+                    type: "ADD_SUBJECT",
+                    kind: "MATERIAL",
+                    name: materialName.trim(),
+                    parentSubjectId: product.id,
+                    source: "USER_ADDED",
+                    generateRequirements: true,
+                  }).then(() => setMaterialName(""));
+                }}
+              >
+                <SourceLabel>Add component or material</SourceLabel>
+                <input
+                  className="mt-2 w-full border border-[#101A15]/15 px-3 py-2 text-[13px]"
+                  placeholder="Stainless Steel 304"
+                  value={materialName}
+                  onChange={(e) => setMaterialName(e.target.value)}
+                />
+                <p className="text-[12px] text-[#101A15]/55">This will create new information requirements. SOURCE takes over from there.</p>
+                <SourceButton type="submit">Add & resolve</SourceButton>
+              </form>
             </div>
           ) : null}
 

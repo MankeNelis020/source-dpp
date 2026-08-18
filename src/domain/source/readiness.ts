@@ -1,11 +1,14 @@
+import { evaluatePermission, permissionGatePass, type PermissionEvaluationInput } from "./permissions";
 import type {
   ClaimRecord,
   EvidenceRecord,
   ExceptionCode,
   GateName,
   GateResult,
+  PermissionDecision,
   PermissionGrant,
   PermissionState,
+  Purpose,
   TrustLevel,
 } from "./types";
 
@@ -17,9 +20,16 @@ export interface ReadinessInput {
   evidence?: EvidenceRecord;
   evidenceRequired: boolean;
   scopeMatch: boolean;
-  permission: PermissionState;
+  /** Preferred: already-evaluated decision. Stored RESTRICTED must not auto-pass. */
+  permissionDecision?: PermissionDecision;
+  permission?: PermissionState;
   permissionRequired: boolean;
   conflict: boolean;
+  permissionContext?: Omit<PermissionEvaluationInput, "storedState" | "permissionRequired"> & {
+    storedState?: PermissionState;
+    requestingOrganisationId?: string;
+    purpose?: Purpose;
+  };
 }
 
 export interface ReadinessReport {
@@ -40,9 +50,23 @@ export function trustMeets(actual: TrustLevel | undefined, required: TrustLevel)
   return TRUST_RANK[actual] >= TRUST_RANK[required];
 }
 
-function permissionPass(state: PermissionState, required: boolean): boolean {
-  if (!required) return true;
-  return state === "GRANTED" || state === "NOT_REQUIRED" || state === "RESTRICTED";
+function resolvePermissionDecision(input: ReadinessInput): PermissionDecision {
+  if (input.permissionDecision) return input.permissionDecision;
+  const stored = input.permission ?? input.permissionContext?.storedState ?? "UNKNOWN";
+  return evaluatePermission({
+    storedState: stored,
+    visibility: input.permissionContext?.visibility,
+    permissionRequired: input.permissionRequired,
+    requestingOrganisationId: input.permissionContext?.requestingOrganisationId ?? "unknown",
+    ownerOrganisationId: input.permissionContext?.ownerOrganisationId,
+    granteeActorId: input.permissionContext?.granteeActorId,
+    purpose: input.permissionContext?.purpose ?? "DPP_COMPLIANCE",
+    grantPurpose: input.permissionContext?.grantPurpose,
+    now: input.permissionContext?.now ?? new Date(0),
+    validFrom: input.permissionContext?.validFrom,
+    validUntil: input.permissionContext?.validUntil,
+    revokedAt: input.permissionContext?.revokedAt,
+  });
 }
 
 export function evaluateReadiness(input: ReadinessInput): ReadinessReport {
@@ -52,7 +76,8 @@ export function evaluateReadiness(input: ReadinessInput): ReadinessReport {
   const evidencePass = input.evidenceRequired ? evidencePresent : true;
   const scopePass = !input.evidence || input.scopeMatch;
   const validityPass = !input.evidence || (!input.evidence.expired && Boolean(input.evidence.validUntil));
-  const permissionPassGate = permissionPass(input.permission, input.permissionRequired);
+  const permissionDecision = resolvePermissionDecision(input);
+  const permissionPassGate = !input.permissionRequired || permissionGatePass(permissionDecision);
   const conflictPass = !input.conflict;
   const trustPass = !input.evidenceRequired || trustMeets(input.trustLevel, input.requiredTrustLevel);
 
@@ -74,8 +99,9 @@ export function evaluateReadiness(input: ReadinessInput): ReadinessReport {
   else if (gates.evidence === "fail") blockingReason = input.trustLevel === "DECLARED" ? "EVIDENCE_MISSING" : "EVIDENCE_MISSING";
   else if (gates.value === "fail") blockingReason = "EVIDENCE_MISSING";
   else if (gates.permission === "fail") {
-    if (input.permission === "REVOKED") blockingReason = "PERMISSION_REVOKED";
-    else if (input.permission === "DENIED") blockingReason = "PERMISSION_DENIED";
+    const stored = input.permission ?? input.permissionContext?.storedState;
+    if (stored === "REVOKED") blockingReason = "PERMISSION_REVOKED";
+    else if (stored === "DENIED" || permissionDecision === "DENY") blockingReason = "PERMISSION_DENIED";
     else blockingReason = "AUTHORIZATION_REQUIRED";
   }
 

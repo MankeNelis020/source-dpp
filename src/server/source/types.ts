@@ -1,0 +1,228 @@
+import type { Command } from "@/domain/source/types";
+
+export type Role =
+  | "OWNER"
+  | "ADMIN"
+  | "COMPLIANCE_MANAGER"
+  | "PROCUREMENT_MANAGER"
+  | "DATA_STEWARD"
+  | "REVIEWER"
+  | "AUDITOR";
+
+export type Capability =
+  | "claim:read"
+  | "claim:approve"
+  | "evidence:read"
+  | "evidence:read_private"
+  | "evidence:export"
+  | "supplier:request"
+  | "supplier:manage_contact"
+  | "permission:request"
+  | "permission:grant"
+  | "permission:revoke"
+  | "identity:review"
+  | "identity:merge"
+  | "identity:split"
+  | "integration:manage"
+  | "organisation:manage"
+  | "catalogue:write"
+  | "import:manage"
+  | "case:read"
+  | "case:resolve";
+
+export type PortalCommand =
+  | "VIEW_REQUIREMENT"
+  | "SUBMIT_RESPONSE"
+  | "UPLOAD_EVIDENCE"
+  | "FORWARD_UPSTREAM"
+  | "ASSIGN_COLLEAGUE"
+  | "DECLINE"
+  | "REQUEST_CLARIFICATION"
+  | "MARK_UNKNOWN"
+  | "MARK_WRONG_CONTACT";
+
+export interface Organisation {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+export interface UserRecord {
+  id: string;
+  email: string;
+  displayName: string;
+}
+
+export interface Membership {
+  id: string;
+  userId: string;
+  organisationId: string;
+  role: Role;
+  capabilities: Capability[];
+}
+
+export interface Principal {
+  kind: "user";
+  userId: string;
+  organisationId: string;
+  membershipId: string;
+  roles: Role[];
+  capabilities: Capability[];
+  email: string;
+}
+
+export interface PortalPrincipal {
+  kind: "supplier_portal";
+  grantId: string;
+  actorId: string;
+  organisationId: string;
+  allowedCaseIds: string[];
+  allowedRequirementIds: string[];
+  allowedCommands: PortalCommand[];
+}
+
+export type AnyPrincipal = Principal | PortalPrincipal;
+
+export interface CommandEnvelope<T extends Command = Command> {
+  commandId: string;
+  idempotencyKey: string;
+  principalId: string;
+  organisationId: string;
+  issuedAt: string;
+  expectedVersion?: number;
+  command: T;
+}
+
+export interface SupplierPortalGrant {
+  id: string;
+  tokenHash: string;
+  actorId: string;
+  tenantContextId: string;
+  allowedCaseIds: string[];
+  allowedRequirementIds: string[];
+  allowedCommands: PortalCommand[];
+  expiresAt: string;
+  revokedAt?: string;
+  createdAt: string;
+}
+
+export interface ProcessedCommand {
+  id: string;
+  idempotencyKey: string;
+  organisationId: string;
+  principalId: string;
+  commandType: string;
+  result: CommandOutcome;
+  processedAt: string;
+}
+
+export interface ImmutableAuditEvent {
+  id: string;
+  organisationId?: string;
+  principalId?: string;
+  action: string;
+  resource?: string;
+  result: "ok" | "denied" | "error";
+  policyVersion?: string;
+  commandId?: string;
+  requestId?: string;
+  reason?: string;
+  detail: string;
+  createdAt: string;
+}
+
+export type CommandErrorCode =
+  | "UNAUTHENTICATED"
+  | "FORBIDDEN"
+  | "RESOURCE_UNAVAILABLE"
+  | "CASE_CHANGED"
+  | "VALIDATION"
+  | "RATE_LIMITED"
+  | "EXPIRED"
+  | "REVOKED";
+
+export class SourceError extends Error {
+  constructor(
+    public readonly code: CommandErrorCode,
+    message: string,
+    public readonly httpStatus: number
+  ) {
+    super(message);
+    this.name = "SourceError";
+  }
+}
+
+export type CommandOutcome =
+  | {
+      status: "ok" | "ALREADY_PROCESSED";
+      caseId?: string;
+      version?: number;
+      events: { type: string; detail: string }[];
+      sideEffects: { type: string; key: string }[];
+    }
+  | { status: "error"; code: CommandErrorCode; message: string };
+
+export interface ImportJob {
+  id: string;
+  organisationId: string;
+  state:
+    | "UPLOADED"
+    | "PARSING"
+    | "NORMALIZING"
+    | "IDENTITY_RESOLUTION"
+    | "RELATIONSHIP_BUILDING"
+    | "MATERIAL_DETECTION"
+    | "EVIDENCE_MATCHING"
+    | "REQUIREMENT_GENERATION"
+    | "RESOLUTION_PLANNING"
+    | "COMPLETE"
+    | "FAILED"
+    | "PARTIAL";
+  currentStage?: string;
+  processedCount: number;
+  totalCount: number;
+  warningCount: number;
+  errorCount: number;
+  reviewCount: number;
+  startedAt?: string;
+  completedAt?: string;
+  mapping: Record<string, string>;
+  summary?: {
+    products: number;
+    suppliers: number;
+    relationships: number;
+    requirements: number;
+    autoResolvable: number;
+    needsAttention: number;
+  };
+}
+
+export interface ImportJobEvent {
+  id: string;
+  jobId: string;
+  type: string;
+  payload: Record<string, string | number | boolean | null>;
+  createdAt: string;
+}
+
+export const PORTAL_ALLOWED_DEFAULT: PortalCommand[] = [
+  "VIEW_REQUIREMENT",
+  "SUBMIT_RESPONSE",
+  "UPLOAD_EVIDENCE",
+  "FORWARD_UPSTREAM",
+  "ASSIGN_COLLEAGUE",
+  "DECLINE",
+  "REQUEST_CLARIFICATION",
+  "MARK_UNKNOWN",
+  "MARK_WRONG_CONTACT",
+];
+
+export const PORTAL_FORBIDDEN = [
+  "VIEW_OTHER_CASES",
+  "VIEW_CUSTOMER_GRAPH",
+  "VIEW_OTHER_SUPPLIERS",
+  "VIEW_PRIVATE_EVIDENCE",
+  "IDENTITY_MERGE",
+  "RESOLVE_CONFLICT",
+  "ADMIN_ACTIONS",
+] as const;

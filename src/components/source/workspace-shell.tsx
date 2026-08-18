@@ -10,6 +10,7 @@ import { SourceWordmark } from "./wordmark";
 import { Mono, SourceLabel, StatusPill } from "./ui";
 import { cn } from "@/lib/utils";
 import { CommandSearch } from "./command-search";
+import { useSourceQuery } from "@/client/source/api";
 
 export function WorkspaceShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -56,6 +57,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
                 className="text-[11px] text-[#101A15]/50 hover:text-[#101A15]"
                 onClick={() => {
                   clearSession();
+                  void fetch("/api/auth/logout", { method: "POST", credentials: "include" });
                   router.push("/");
                 }}
               >
@@ -81,7 +83,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
             <SourceWordmark size="sm" />
           </button>
           <div className="hidden md:block">
-            <StatusPill tone="muted">Demo workspace</StatusPill>
+            <ImportBanner />
           </div>
           <CommandSearch />
         </header>
@@ -103,4 +105,14 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
       </div>
     </div>
   );
+}
+
+function ImportBanner() {
+  const { data } = useSourceQuery<{ jobs: { id: string; state: string; processedCount: number; totalCount: number }[] }>("/api/imports");
+  const running = data?.jobs.find((j) => j.state !== "COMPLETE" && j.state !== "FAILED" && j.state !== "PARTIAL");
+  if (!running) {
+    return <StatusPill tone="muted">Server-backed workspace</StatusPill>;
+  }
+  const pct = running.totalCount ? Math.round((running.processedCount / running.totalCount) * 100) : 0;
+  return <StatusPill tone="teal">Import running · {pct}%</StatusPill>;
 }

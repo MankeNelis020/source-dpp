@@ -1,4 +1,7 @@
-import type { Actor, IdentityStatus } from "./types";
+import { IDENTITY_ENGINE_VERSION, type Actor, type IdentityEngineVersion, type IdentityStatus } from "./types";
+
+export { IDENTITY_ENGINE_VERSION };
+export const IDENTITY_SCORES_ARE_CALIBRATED = false;
 
 export interface IdentityQuery {
   name?: string;
@@ -21,6 +24,8 @@ export interface IdentityResolution {
   candidates: IdentityCandidate[];
   selected?: Actor;
   autoLinkAllowed: boolean;
+  modelVersion: IdentityEngineVersion;
+  scoresAreCalibrated: false;
 }
 
 function normalize(value?: string): string {
@@ -72,12 +77,17 @@ export function resolveIdentity(
 
   const probable = candidates.filter((c) => c.confidence >= 80);
 
+  const meta = {
+    modelVersion: IDENTITY_ENGINE_VERSION,
+    scoresAreCalibrated: false as const,
+  };
+
   if (probable.length === 0) {
-    return { status: "IDENTITY_NOT_FOUND", candidates, autoLinkAllowed: false };
+    return { status: "IDENTITY_NOT_FOUND", candidates, autoLinkAllowed: false, ...meta };
   }
 
   if (probable.length > 1 && Math.abs(probable[0].confidence - probable[1].confidence) < 5) {
-    return { status: "IDENTITY_AMBIGUOUS", candidates: probable, autoLinkAllowed: false };
+    return { status: "IDENTITY_AMBIGUOUS", candidates: probable, autoLinkAllowed: false, ...meta };
   }
 
   const top = probable[0];
@@ -87,6 +97,7 @@ export function resolveIdentity(
       candidates: probable,
       selected: top.actor,
       autoLinkAllowed: true,
+      ...meta,
     };
   }
 
@@ -95,5 +106,6 @@ export function resolveIdentity(
     candidates: probable,
     selected: top.actor,
     autoLinkAllowed: false,
+    ...meta,
   };
 }

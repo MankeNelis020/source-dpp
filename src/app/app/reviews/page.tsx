@@ -1,106 +1,84 @@
 "use client";
 
-import { useState } from "react";
-import { DEMO_EVIDENCE_REVIEWS, DEMO_IDENTITY_REVIEWS } from "@/lib/source/demo-data";
+import Link from "next/link";
 import { PageHeader } from "@/components/source/page-header";
-import { SourceButton, SourceLabel, StatusPill } from "@/components/source/ui";
-import { useEngineState } from "@/domain/source/store";
+import { SourceButton, SourceLabel } from "@/components/source/ui";
+import { useDispatchCommand, useSourceQuery } from "@/client/source/api";
+
+interface Task {
+  id: string;
+  caseId?: string;
+  title: string;
+  context: string;
+  recommendedAction: string;
+  kind: string;
+  unlock: number;
+  minutesEstimate: number;
+}
 
 export default function ReviewsPage() {
-  const [identity, setIdentity] = useState(DEMO_IDENTITY_REVIEWS);
-  const [evidence, setEvidence] = useState(DEMO_EVIDENCE_REVIEWS);
-  const engine = useEngineState();
-  const tasks = engine.tasks.filter((t) => t.status === "open");
+  const { data, reload } = useSourceQuery<{ tasks: Task[] }>("/api/source/needs-you");
+  const dispatch = useDispatchCommand();
+  const tasks = data?.tasks ?? [];
 
   return (
     <div className="mx-auto max-w-5xl">
       <PageHeader
-        title="Reviews"
-        description="Human review is a first-class workflow: fast cards, not a form. SOURCE never auto-merges in doubt. Tasks are action-oriented."
+        title="Needs you"
+        description="Sorted by unlock: the next minutes should free the most products. Each card is one decision."
       />
-      {tasks.length ? (
-        <section className="mb-12">
-          <h2 className="font-[family-name:var(--font-space)] text-[20px]">Open tasks</h2>
-          <div className="mt-4 space-y-3">
-            {tasks.map((task) => (
-              <article key={task.id} className="border border-[#101A15]/10 bg-[#FBFCFA] p-5">
-                <SourceLabel>{task.kind}</SourceLabel>
-                <p className="mt-2 text-[14.5px]">{task.title}</p>
-                <p className="mt-1 text-[13px] text-[#101A15]/65">{task.context}</p>
-                <p className="mt-2 text-[13px]">Recommended: {task.recommendedAction}</p>
-                <div className="mt-4">
-                  <SourceButton href={`/app/missing/${task.caseId}`} variant="ghost">
-                    Open case {task.caseId}
+      <div className="space-y-3">
+        {tasks.map((task) => (
+          <article key={task.id} className="border border-[#101A15]/10 bg-[#FBFCFA] p-5">
+            <SourceLabel>
+              {task.minutesEstimate} minutes to unblock {task.unlock} product{task.unlock === 1 ? "" : "s"}
+            </SourceLabel>
+            <p className="mt-2 text-[16px]">{task.title}</p>
+            <p className="mt-1 text-[13px] text-[#101A15]/65">{task.context}</p>
+            <p className="mt-2 text-[13px]">Recommended: {task.recommendedAction}</p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {task.kind === "identity" && task.caseId ? (
+                <>
+                  <SourceButton
+                    onClick={() =>
+                      void dispatch({ type: "CONFIRM_IDENTITY", caseId: task.caseId!, decision: "confirm", actorId: "acme-alu-gmbh" }).then(reload)
+                    }
+                  >
+                    Confirm
                   </SourceButton>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-      ) : null}
-      <h2 className="font-[family-name:var(--font-space)] text-[20px]">Identity review</h2>
-      <p className="mt-1 text-[13px] text-[#101A15]/60">Are these the same supplier?</p>
-      <div className="mt-4 space-y-3">
-        {identity.map((item) => (
-          <article key={item.id} className="border border-[#101A15]/10 bg-[#FBFCFA] p-5">
-            <SourceLabel>likely matches</SourceLabel>
-            <div className="mt-2 grid gap-4 md:grid-cols-2">
-              <div>
-                <div className="font-[family-name:var(--font-plex)] text-[13px]">{item.source}</div>
-              </div>
-              <div>
-                <div className="font-[family-name:var(--font-space)] text-[18px]">{item.candidate}</div>
-                <p className="mt-1 text-[12px] text-[#101A15]/55">{item.meta}</p>
-                <div className="mt-2">
-                  <StatusPill tone="signal">Confidence {item.confidence}%</StatusPill>
-                </div>
-              </div>
-            </div>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <SourceButton onClick={() => setIdentity((rows) => rows.filter((r) => r.id !== item.id))}>
-                Confirm
-              </SourceButton>
-              <SourceButton
-                variant="ghost"
-                onClick={() => setIdentity((rows) => rows.filter((r) => r.id !== item.id))}
-              >
-                Reject
-              </SourceButton>
-              <SourceButton variant="ghost">Search another</SourceButton>
+                  <SourceButton
+                    variant="ghost"
+                    onClick={() => void dispatch({ type: "CONFIRM_IDENTITY", caseId: task.caseId!, decision: "reject" }).then(reload)}
+                  >
+                    Not the same
+                  </SourceButton>
+                </>
+              ) : null}
+              {task.kind === "conflict" && task.caseId ? (
+                <>
+                  <SourceButton onClick={() => void dispatch({ type: "RESOLVE_CONFLICT", caseId: task.caseId!, outcome: "manual_adjudication" }).then(reload)}>
+                    Use newer
+                  </SourceButton>
+                  <SourceButton variant="ghost" onClick={() => void dispatch({ type: "RESOLVE_CONFLICT", caseId: task.caseId!, outcome: "different_scope" }).then(reload)}>
+                    Review scope
+                  </SourceButton>
+                </>
+              ) : null}
+              {task.caseId ? (
+                <SourceButton href={`/app/missing/${task.caseId}`} variant="ghost">
+                  Open case
+                </SourceButton>
+              ) : null}
             </div>
           </article>
         ))}
-        {identity.length === 0 ? (
-          <p className="text-[13px] text-[#0B6E50]">Identity queue clear. No data was merged without confirmation.</p>
-        ) : null}
+        {tasks.length === 0 ? <p className="text-[13px] text-[#0B6E50]">No blockers need you right now. SOURCE is working the rest.</p> : null}
       </div>
-
-      <h2 className="mt-12 font-[family-name:var(--font-space)] text-[20px]">Evidence review</h2>
-      <div className="mt-4 space-y-3">
-        {evidence.map((item) => (
-          <article key={item.id} className="border border-[#101A15]/10 bg-[#FBFCFA] p-5">
-            <SourceLabel>{item.document}</SourceLabel>
-            <p className="mt-2 text-[14.5px]">
-              We found: {item.finding} · Page {item.page} · Confidence {item.confidence}%
-            </p>
-            <p className="mt-2 text-[12px] text-[#101A15]/55">
-              AI proposes; SOURCE records provenance. This does not set VERIFIED = true.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <SourceButton onClick={() => setEvidence((rows) => rows.filter((r) => r.id !== item.id))}>
-                Accept
-              </SourceButton>
-              <SourceButton variant="ghost">Correct</SourceButton>
-              <SourceButton
-                variant="ghost"
-                onClick={() => setEvidence((rows) => rows.filter((r) => r.id !== item.id))}
-              >
-                Not present
-              </SourceButton>
-            </div>
-          </article>
-        ))}
-      </div>
+      <p className="mt-8">
+        <Link href="/app/missing" className="text-[13px] hover:underline">
+          All resolution cases
+        </Link>
+      </p>
     </div>
   );
 }
