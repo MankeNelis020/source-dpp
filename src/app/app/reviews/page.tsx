@@ -13,6 +13,7 @@ interface Task {
   recommendedAction: string;
   kind: string;
   unlock: number;
+  requirementsUnlocked?: number;
   minutesEstimate: number;
 }
 
@@ -31,7 +32,8 @@ export default function ReviewsPage() {
         {tasks.map((task) => (
           <article key={task.id} className="border border-[#101A15]/10 bg-[#FBFCFA] p-5">
             <SourceLabel>
-              {task.minutesEstimate} minutes to unblock {task.unlock} product{task.unlock === 1 ? "" : "s"}
+              {task.minutesEstimate} minutes of review could unblock {task.unlock} product{task.unlock === 1 ? "" : "s"}
+            {task.requirementsUnlocked ? ` · ${task.requirementsUnlocked} requirements` : ""}
             </SourceLabel>
             <p className="mt-2 text-[16px]">{task.title}</p>
             <p className="mt-1 text-[13px] text-[#101A15]/65">{task.context}</p>

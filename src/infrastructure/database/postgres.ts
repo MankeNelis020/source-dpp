@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type { EngineState, PermissionState, Purpose, TrustLevel } from "@/domain/source/types";
-import { emptyState } from "@/domain/source";
+import { emptyState, hydrateEngineState } from "@/domain/source";
 import { hashesEqual } from "@/infrastructure/crypto/tokens";
 import type { OutboxRecord, OutboxStatus } from "@/infrastructure/outbox/types";
 import type {
   ImmutableAuditEvent,
   ImportJob,
   ImportJobEvent,
+  ImportMappingProfile,
   Membership,
   Organisation,
   ProcessedCommand,
@@ -136,7 +137,7 @@ export class PostgresPersistence implements PersistencePort {
         empty.tenant.id = organisationId;
         return empty;
       }
-      return rows[0].state_json as EngineState;
+      return hydrateEngineState(rows[0].state_json as EngineState);
     });
   }
 
@@ -316,12 +317,13 @@ export class PostgresPersistence implements PersistencePort {
     await this.q(
       `INSERT INTO import_jobs (
          id, organisation_id, state, current_stage, processed_count, total_count, warning_count, error_count, review_count,
-         started_at, completed_at, mapping, summary
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb)
+         started_at, completed_at, mapping, summary, raw_records
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb)
        ON CONFLICT (id) DO UPDATE SET
          state = EXCLUDED.state, current_stage = EXCLUDED.current_stage, processed_count = EXCLUDED.processed_count,
          total_count = EXCLUDED.total_count, warning_count = EXCLUDED.warning_count, error_count = EXCLUDED.error_count,
-         review_count = EXCLUDED.review_count, completed_at = EXCLUDED.completed_at, summary = EXCLUDED.summary`,
+         review_count = EXCLUDED.review_count, completed_at = EXCLUDED.completed_at, summary = EXCLUDED.summary,
+         mapping = EXCLUDED.mapping, raw_records = EXCLUDED.raw_records`,
       [
         job.id,
         job.organisationId,
@@ -336,6 +338,7 @@ export class PostgresPersistence implements PersistencePort {
         job.completedAt ?? null,
         JSON.stringify(job.mapping ?? {}),
         job.summary ? JSON.stringify(job.summary) : null,
+        job.rawRecords ? JSON.stringify(job.rawRecords) : null,
       ]
     );
   }
@@ -345,7 +348,7 @@ export class PostgresPersistence implements PersistencePort {
       `SELECT id, organisation_id AS "organisationId", state, current_stage AS "currentStage",
               processed_count AS "processedCount", total_count AS "totalCount", warning_count AS "warningCount",
               error_count AS "errorCount", review_count AS "reviewCount", started_at AS "startedAt",
-              completed_at AS "completedAt", mapping, summary
+              completed_at AS "completedAt", mapping, summary, raw_records AS "rawRecords"
        FROM import_jobs WHERE id = $1`,
       [id]
     );
@@ -374,6 +377,36 @@ export class PostgresPersistence implements PersistencePort {
       [jobId]
     );
     return rows as ImportJobEvent[];
+  }
+
+  async saveMappingProfile(profile: ImportMappingProfile) {
+    await this.setTenant(profile.organisationId);
+    await this.q(
+      `INSERT INTO import_mapping_profiles (id, organisation_id, source_format, mapping, mapping_version, created_at, updated_at)
+       VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7)
+       ON CONFLICT (organisation_id, source_format) DO UPDATE SET
+         mapping = EXCLUDED.mapping, mapping_version = EXCLUDED.mapping_version, updated_at = EXCLUDED.updated_at`,
+      [
+        profile.id,
+        profile.organisationId,
+        profile.sourceFormat,
+        JSON.stringify(profile.mapping),
+        profile.mappingVersion,
+        profile.createdAt,
+        profile.updatedAt,
+      ]
+    );
+  }
+
+  async getMappingProfile(organisationId: string, sourceFormat: string) {
+    await this.setTenant(organisationId);
+    const { rows } = await this.q(
+      `SELECT id, organisation_id AS "organisationId", source_format AS "sourceFormat", mapping,
+              mapping_version AS "mappingVersion", created_at AS "createdAt", updated_at AS "updatedAt"
+       FROM import_mapping_profiles WHERE organisation_id = $1 AND source_format = $2`,
+      [organisationId, sourceFormat]
+    );
+    return rows[0] as ImportMappingProfile | undefined;
   }
 
   async putEvidence(object: EvidenceObject) {

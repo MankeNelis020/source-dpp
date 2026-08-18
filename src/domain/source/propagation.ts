@@ -1,6 +1,7 @@
 import { evaluatePermission } from "./permissions";
 import { evaluateReadiness } from "./readiness";
 import { trustMeets } from "./readiness";
+import { recordContactAvoided, recordRequirementOutcome } from "./analytics";
 import type {
   ClaimRecord,
   EngineState,
@@ -54,6 +55,12 @@ export function claimsCompatible(args: {
   return !expired;
 }
 
+export function evidenceScopeApplies(evidence: EvidenceRecord | undefined, subjectId: string): boolean {
+  if (!evidence) return true;
+  if (!evidence.scope.id) return false;
+  return evidence.scope.id === subjectId;
+}
+
 export function evaluatePropagationCandidate(args: {
   claim: ClaimRecord;
   requirement: InformationRequirement;
@@ -61,10 +68,14 @@ export function evaluatePropagationCandidate(args: {
   permission?: PermissionGrant;
   requestingOrganisationId: string;
   now: Date;
+  identityMatched?: boolean;
+  conflict?: boolean;
 }): PropagationResult {
   if (args.claim.subjectId !== args.requirement.subjectId || args.claim.propertyId !== args.requirement.propertyId) {
     return "NO_MATCH";
   }
+  if (args.identityMatched === false) return "NO_MATCH";
+  if (args.conflict) return "NO_MATCH";
   const expired =
     args.evidence?.expired ||
     (args.claim.validUntil ? new Date(args.claim.validUntil) < args.now : false);
@@ -91,9 +102,9 @@ export function evaluatePropagationCandidate(args: {
     return "VERIFICATION_ONLY_AVAILABLE";
   }
 
-  const scopeMatch = !args.evidence || args.evidence.scope.id === args.requirement.subjectId || args.evidence.scope.kind === "product";
+  const scopeMatch = evidenceScopeApplies(args.evidence, args.requirement.subjectId);
   const report = evaluateReadiness({
-    identity: { matched: true, confidence: args.claim.identityConfidence, autoLinkThreshold: 95 },
+    identity: { matched: args.identityMatched !== false, confidence: args.claim.identityConfidence, autoLinkThreshold: 95 },
     valuePresent: Boolean(args.claim.value),
     trustLevel: args.claim.trustLevel,
     requiredTrustLevel: args.requirement.requiredTrustLevel,
@@ -102,7 +113,7 @@ export function evaluatePropagationCandidate(args: {
     scopeMatch,
     permissionDecision: decision,
     permissionRequired: args.requirement.requiredPermissionLevel === "granted",
-    conflict: false,
+    conflict: Boolean(args.conflict),
   });
   return report.ready ? "READY" : "NO_MATCH";
 }
@@ -134,6 +145,10 @@ export function propagateReadyClaim(
 
   for (const requirement of state.requirements) {
     if (requirement.resolvedAt) continue;
+    if (requirement.id === claim.requirementId) continue;
+    const resolution = state.cases.find((c) => c.id === requirement.linkedCaseId);
+    const identityMatched = !resolution || resolution.identityStatus === "IDENTITY_MATCHED";
+    const conflict = state.conflicts.some((c) => c.caseId === requirement.linkedCaseId && !c.resolved);
     const result = evaluatePropagationCandidate({
       claim,
       requirement,
@@ -141,6 +156,8 @@ export function propagateReadyClaim(
       permission,
       requestingOrganisationId: state.tenant.id,
       now,
+      identityMatched,
+      conflict,
     });
     events.push({
       type: "resolution.candidate_found",
@@ -155,7 +172,24 @@ export function propagateReadyClaim(
     });
     if (result === "READY") {
       requirement.resolvedAt = timestamp;
-      const resolution = state.cases.find((c) => c.id === requirement.linkedCaseId);
+      recordRequirementOutcome(state, {
+        requirementId: requirement.id,
+        mechanism: "SAME_TENANT_REUSE",
+        claimId,
+        evidenceId: evidence?.id,
+        recordedAt: timestamp,
+      });
+      if (resolution?.state === "WAITING_RESPONSE" || resolution?.state === "REQUEST_PENDING" || resolution?.state === "ROUTING") {
+        recordContactAvoided(state, {
+          requirementId: requirement.id,
+          caseId: resolution.id,
+          supplierActorId: resolution.currentActorId,
+          avoidedBy: "PROPAGATION",
+          claimId,
+          evidenceId: evidence?.id,
+          timestamp,
+        });
+      }
       if (resolution && resolution.state !== "READY" && resolution.state !== "MONITORING") {
         resolution.state = "READY";
         resolution.resolutionOutcome = "READY";

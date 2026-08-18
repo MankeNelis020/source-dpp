@@ -1,9 +1,9 @@
 import { ROLE_CAPABILITIES } from "@/server/source/authorization";
 import type { EngineState } from "@/domain/source/types";
-import { createSeedState, emptyState } from "@/domain/source";
+import { createSeedState, emptyState, hydrateEngineState } from "@/domain/source";
 import { hashToken, hashesEqual } from "@/infrastructure/crypto/tokens";
 import type { OutboxRecord, OutboxStatus } from "@/infrastructure/outbox/types";
-import { PORTAL_ALLOWED_DEFAULT, type ImportJob, type ImportJobEvent, type ImmutableAuditEvent, type Membership, type Organisation, type ProcessedCommand, type SupplierPortalGrant, type UserRecord } from "@/server/source/types";
+import { PORTAL_ALLOWED_DEFAULT, type ImportJob, type ImportJobEvent, type ImportMappingProfile, type ImmutableAuditEvent, type Membership, type Organisation, type ProcessedCommand, type SupplierPortalGrant, type UserRecord } from "@/server/source/types";
 import type { EvidenceObject, PersistencePort, SessionRecord, ShareableTrustCandidate } from "./ports";
 
 const DEMO_EXPIRY = "2027-08-17T00:00:00.000Z";
@@ -114,6 +114,7 @@ export class MemoryPersistence implements PersistencePort {
   audit: ImmutableAuditEvent[] = [];
   importJobs = new Map<string, ImportJob>();
   importEvents = new Map<string, ImportJobEvent[]>();
+  mappingProfiles = new Map<string, ImportMappingProfile>();
   evidence = new Map<string, EvidenceObject>();
   outbox: OutboxRecord[] = [];
   sessions = new Map<string, SessionRecord>();
@@ -216,6 +217,7 @@ export class MemoryPersistence implements PersistencePort {
     this.audit = [];
     this.importJobs.clear();
     this.importEvents.clear();
+    this.mappingProfiles.clear();
     this.evidence.clear();
     this.outbox = [];
     this.sessions.clear();
@@ -248,10 +250,16 @@ export class MemoryPersistence implements PersistencePort {
       this.engines.set(organisationId, empty);
       return structuredClone(empty);
     }
-    return structuredClone(state);
+    return hydrateEngineState(structuredClone(state));
   }
   saveEngine(organisationId: string, state: EngineState) {
     this.engines.set(organisationId, structuredClone(state));
+  }
+  saveMappingProfile(profile: ImportMappingProfile) {
+    this.mappingProfiles.set(`${profile.organisationId}:${profile.sourceFormat}`, { ...profile });
+  }
+  getMappingProfile(organisationId: string, sourceFormat: string) {
+    return this.mappingProfiles.get(`${organisationId}:${sourceFormat}`);
   }
   findProcessedCommand(organisationId: string, idempotencyKey: string) {
     return this.processed.get(`${organisationId}:${idempotencyKey}`);

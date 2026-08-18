@@ -68,7 +68,7 @@ export function scoreActor(query: IdentityQuery, actor: Actor): IdentityCandidat
 export function resolveIdentity(
   query: IdentityQuery,
   actors: Actor[],
-  autoLinkThreshold: number
+  _autoLinkThreshold: number
 ): IdentityResolution {
   const candidates = actors
     .map((actor) => scoreActor(query, actor))
@@ -91,7 +91,10 @@ export function resolveIdentity(
   }
 
   const top = probable[0];
-  if (top.confidence >= autoLinkThreshold) {
+  // Precision over recall: only VAT/LEI exact matches auto-link. Name, domain and
+  // near-threshold scores stay probable so a wrong merge cannot inflate avoidance.
+  void _autoLinkThreshold;
+  if (top.method === "exact") {
     return {
       status: "IDENTITY_MATCHED",
       candidates: probable,

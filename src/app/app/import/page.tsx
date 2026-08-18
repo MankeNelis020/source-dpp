@@ -143,7 +143,13 @@ export default function ImportWizardPage() {
             </p>
           ) : null}
           <div className="mt-6 flex flex-wrap gap-2">
-            <SourceButton onClick={() => router.push("/app/missing")}>Let SOURCE handle the gaps</SourceButton>
+            <SourceButton
+              onClick={() =>
+                void api("/api/source/resolution-run", { method: "POST", body: "{}" }).then(() => router.push("/app/pilot"))
+              }
+            >
+              Let SOURCE handle the gaps
+            </SourceButton>
             <SourceButton href="/app/reviews" variant="ghost">
               Review {job.reviewCount || job.summary.needsAttention}
             </SourceButton>

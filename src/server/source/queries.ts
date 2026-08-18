@@ -2,6 +2,7 @@ import { caseReadiness } from "@/domain/source/engine";
 import { explainException } from "@/domain/source/copy";
 import type { CaseFilter, EngineState, ResolutionCase, ResolutionCaseState } from "@/domain/source/types";
 import { matchesFilter } from "@/domain/source/queries";
+import { evaluatePilotRun, humanPilotSentences } from "@/domain/source/analytics";
 import type { PersistencePort } from "@/infrastructure/database/ports";
 import { hasCapability } from "./authorization";
 import { isConfidentialActor, projectActor, projectEvidenceForState, safeActorLabel } from "./confidentiality";
@@ -42,6 +43,7 @@ export interface NeedsYouTask {
   recommendedAction: string;
   kind: string;
   unlock: number;
+  requirementsUnlocked?: number;
   minutesEstimate: number;
 }
 
@@ -90,8 +92,9 @@ export async function getResolutionWorkboard(store: PersistencePort, principal: 
       DETECTED: bucket(DETECTED),
       RESOLVING: bucket(RESOLVING),
       WAITING: bucket(WAITING),
-      NEEDS_YOU: bucket(NEEDS_YOU) + state.tasks.filter((t) => t.status === "open").length,
-      RESOLVED: bucket(RESOLVED) + state.cases.filter((c) => c.state === "UNRESOLVED").length,
+      NEEDS_YOU: bucket(NEEDS_YOU),
+      RESOLVED: bucket(RESOLVED),
+      UNRESOLVED: state.cases.filter((c) => c.state === "UNRESOLVED").length,
     },
     activity: state.events.slice().reverse().slice(0, 20).map((e) => projectDomainEvent(state, e, "tenant")),
     breakdown: {
@@ -244,6 +247,10 @@ export async function getProductDetail(store: PersistencePort, principal: Princi
         confidence: child?.confidence,
       };
     });
+  const relatedCases = state.cases.filter((c) => {
+    const requirement = state.requirements.find((r) => r.id === c.requirementId);
+    return c.productId === productId || requirement?.productIds.includes(productId) || requirement?.subjectId === productId;
+  });
   return {
     id: productId,
     name: subject?.name ?? productId,
@@ -251,6 +258,27 @@ export async function getProductDetail(store: PersistencePort, principal: Princi
     source: subject?.source,
     blockers,
     children,
+    buckets: {
+      READY: relatedCases.filter((c) => c.state === "READY" || c.state === "MONITORING").length,
+      RESOLVING: relatedCases.filter((c) => RESOLVING.includes(c.state)).length,
+      WAITING: relatedCases.filter((c) => WAITING.includes(c.state)).length,
+      NEEDS_YOU: relatedCases.filter((c) => NEEDS_YOU.includes(c.state)).length,
+      UNRESOLVED: relatedCases.filter((c) => c.state === "UNRESOLVED").length,
+    },
+    requirements: state.requirements
+      .filter((r) => r.productIds.includes(productId) || r.subjectId === productId)
+      .map((r) => {
+        const resolution = state.cases.find((c) => c.id === r.linkedCaseId);
+        return {
+          id: r.id,
+          propertyLabel: r.propertyLabel,
+          subjectLabel: r.subjectLabel,
+          state: resolution?.state,
+          selectedRoute: r.selectedRoute,
+          selectedRouteReason: r.selectedRouteReason,
+          mechanism: r.resolutionMechanism,
+        };
+      }),
   };
 }
 
@@ -263,7 +291,10 @@ export async function getNeedsYouTasks(store: PersistencePort, principal: Princi
         const resolution = state.cases.find((c) => c.id === t.caseId);
         return resolution && r.id === resolution.requirementId;
       });
-      const unlock = requirement?.productIds.length ?? 1;
+      const subjectId = requirement?.subjectId;
+      const related = state.requirements.filter((r) => r.subjectId === subjectId && !r.resolvedAt);
+      const unlock = new Set(related.flatMap((r) => r.productIds)).size || requirement?.productIds.length || 1;
+      const requirementsUnlocked = related.length;
       return {
         id: t.id,
         caseId: t.caseId,
@@ -272,7 +303,8 @@ export async function getNeedsYouTasks(store: PersistencePort, principal: Princi
         recommendedAction: t.recommendedAction,
         kind: t.kind,
         unlock,
-        minutesEstimate: t.kind === "identity" ? 3 : 5,
+        requirementsUnlocked,
+        minutesEstimate: t.kind === "identity" ? 4 : 5,
       };
     });
   return tasks.sort((a, b) => b.unlock - a.unlock);
@@ -400,4 +432,64 @@ export async function getInternalAudit(store: PersistencePort, principal: Princi
   const domain = state.events.map((event) => projectDomainEvent(state, event, "internal"));
   const structured = (await store.listAudit(principal.organisationId)).map((event) => projectStructuredAudit(event, "internal"));
   return [...domain, ...structured];
+}
+
+export async function getMaterialDetail(store: PersistencePort, principal: Principal, materialId: string) {
+  const state = await loadTenant(store, principal);
+  const subject = state.subjects.find((s) => s.id === materialId);
+  if (!subject || (subject.kind !== "MATERIAL" && subject.kind !== "RAW_MATERIAL" && subject.kind !== "COMPONENT")) {
+    throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
+  }
+  const productIds = new Set(
+    state.requirements.filter((r) => r.subjectId === materialId).flatMap((r) => r.productIds)
+  );
+  const reqs = state.requirements.filter((r) => r.subjectId === materialId);
+  const cases = state.cases.filter((c) => reqs.some((r) => r.id === c.requirementId));
+  return {
+    id: materialId,
+    name: subject.name,
+    kind: subject.kind,
+    usedInProducts: productIds.size,
+    components: state.subjectRelationships.filter((r) => r.childSubjectId === materialId).length,
+    suppliers: new Set(cases.map((c) => c.supplierId).filter(Boolean)).size,
+    requirements: reqs.length,
+    ready: reqs.filter((r) => r.resolvedAt).length,
+    resolving: cases.filter((c) => !["READY", "UNRESOLVED", "MONITORING"].includes(c.state)).length,
+    blocked: cases.filter((c) => ["AUTHORIZATION_REQUIRED", "CONFLICT", "IDENTITY_REVIEW"].includes(c.state)).length,
+  };
+}
+
+export async function getSupplierOverview(store: PersistencePort, principal: Principal, supplierId: string) {
+  const state = await loadTenant(store, principal);
+  const actor = state.actors.find((a) => a.id === supplierId);
+  if (!actor || actor.confidential) {
+    throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
+  }
+  const cases = state.cases.filter((c) => c.supplierId === supplierId);
+  const products = new Set(cases.map((c) => c.productId).filter(Boolean));
+  return {
+    id: supplierId,
+    name: actor.name,
+    legalName: actor.legalName,
+    country: actor.country,
+    productsSupplied: products.size,
+    components: state.subjectRelationships.filter((r) => cases.some((c) => c.productId === r.parentSubjectId)).length,
+    openRequirements: cases.filter((c) => c.state !== "READY" && c.state !== "UNRESOLVED").length,
+    evidenceReused: state.requirementOutcomes.filter((o) =>
+      ["EXISTING_CLAIM", "SAME_TENANT_REUSE", "EVIDENCE_EXTRACTION"].includes(o.mechanism)
+    ).length,
+    requestsAvoided: state.contactAvoidances.filter((a) => a.supplierActorId === supplierId).length,
+    activeRequests: state.requests.filter((r) => r.supplierId === supplierId && (r.status === "SENT" || r.status === "DELIVERED" || r.status === "STARTED")).length,
+    waitingUpstream: cases.filter((c) => c.state === "WAITING_UPSTREAM").length,
+  };
+}
+
+export async function getPilotResults(store: PersistencePort, principal: Principal) {
+  const state = await loadTenant(store, principal);
+  const run = state.pilotRuns[state.pilotRuns.length - 1];
+  if (!run) {
+    return { run: null, evaluation: null, sentences: [] as string[] };
+  }
+  const evaluation = evaluatePilotRun(state, run);
+  return { run, evaluation, sentences: humanPilotSentences(evaluation) };
 }

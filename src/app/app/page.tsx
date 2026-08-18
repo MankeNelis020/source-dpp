@@ -51,7 +51,7 @@ export default function OverviewPage() {
       </section>
 
       {board ? (
-        <section className="mt-8 grid gap-3 sm:grid-cols-5">
+        <section className="mt-8 grid gap-3 sm:grid-cols-6">
           {Object.entries(board.columns).map(([key, value]) => (
             <Link key={key} href="/app/missing" className="border border-[#101A15]/10 bg-[#FBFCFA] px-4 py-4">
               <SourceLabel>{key.replaceAll("_", " ")}</SourceLabel>

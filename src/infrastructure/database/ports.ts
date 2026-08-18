@@ -3,6 +3,7 @@ import type {
   ImmutableAuditEvent,
   ImportJob,
   ImportJobEvent,
+  ImportMappingProfile,
   Membership,
   Organisation,
   ProcessedCommand,
@@ -60,6 +61,9 @@ export interface PersistencePort {
 
   loadEngine(organisationId: string): MaybePromise<EngineState>;
   saveEngine(organisationId: string, state: EngineState): MaybePromise<void>;
+
+  saveMappingProfile?(profile: ImportMappingProfile): MaybePromise<void>;
+  getMappingProfile?(organisationId: string, sourceFormat: string): MaybePromise<ImportMappingProfile | undefined>;
 
   findProcessedCommand(organisationId: string, idempotencyKey: string): MaybePromise<ProcessedCommand | undefined>;
   saveProcessedCommand(record: ProcessedCommand): MaybePromise<void>;
