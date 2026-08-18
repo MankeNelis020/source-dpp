@@ -5,9 +5,12 @@ import { resolveIdentity } from "./identity";
 import { IDENTITY_ENGINE_VERSION } from "./identity";
 import { evaluatePermission } from "./permissions";
 import { evaluateReadiness, mayAutoLinkEvidence } from "./readiness";
-import { evaluateReuse, findActiveDuplicate } from "./reuse";
+import { findActiveDuplicate } from "./reuse";
 import { pickContact } from "./routing";
 import { defaultPropertiesForKind, productIdsForSubject } from "./subjects";
+import { gatherPlannerInput, planResolution } from "./planner";
+import { evidenceScopeApplies } from "./propagation";
+import { recordContactAvoided, recordRequirementOutcome } from "./analytics";
 import type {
   AuditEvent,
   ClaimRecord,
@@ -20,8 +23,18 @@ import type {
   PermissionGrant,
   ResolutionAttempt,
   ResolutionCase,
+  ResolutionMechanism,
+  SubjectRelationKind,
   SupplierRequest,
 } from "./types";
+
+export function hydrateEngineState(state: EngineState): EngineState {
+  state.requirementOutcomes ??= [];
+  state.contactAvoidances ??= [];
+  state.pilotRuns ??= [];
+  state.requestGroups ??= [];
+  return state;
+}
 
 export function emptyState(): EngineState {
   return {
@@ -46,13 +59,17 @@ export function emptyState(): EngineState {
     subjectIdentifiers: [],
     tenantSubjectMappings: [],
     identityDecisions: [],
+    requirementOutcomes: [],
+    contactAvoidances: [],
+    pilotRuns: [],
+    requestGroups: [],
     tenant: { id: "acme", name: "Acme Manufacturing B.V.", identityAutoLinkThreshold: 95 },
     seq: 1,
   };
 }
 
 export function applyCommand(state: EngineState, command: Command, now: Date): EngineResult {
-  const next = structuredClone(state);
+  const next = hydrateEngineState(structuredClone(state));
   const events: AuditEvent[] = [];
   const emit = (event: Omit<AuditEvent, "id">) => {
     const full: AuditEvent = { ...event, id: id(next, "evt") };
@@ -127,6 +144,15 @@ export function applyCommand(state: EngineState, command: Command, now: Date): E
     }
     case "ADD_SUBJECT":
       addSubject(next, command, now, emit);
+      return done(next, events);
+    case "MERGE_SUBJECTS":
+      mergeSubjects(next, command, now, emit);
+      return done(next, events);
+    case "SPLIT_SUBJECT":
+      splitSubject(next, command, now, emit);
+      return done(next, events);
+    case "APPLY_BULK_SUBJECT_CORRECTION":
+      bulkCorrectSubjects(next, command, now, emit);
       return done(next, events);
     case "CORRECT_SUBJECT_RELATIONSHIP":
       correctSubjectRelationship(next, command, now, emit);
@@ -242,10 +268,18 @@ function openRequirement(
   if (duplicate) {
     const existing = state.requirements.find((r) => r.id === requirement.id);
     if (!existing) {
-      state.requirements.push({ ...requirement, linkedCaseId: duplicate.caseId });
+      state.requirements.push({ ...requirement, linkedCaseId: duplicate.caseId, selectedRoute: "active_duplicate_case" });
     } else {
       existing.linkedCaseId = duplicate.caseId;
+      existing.selectedRoute = "active_duplicate_case";
     }
+    recordContactAvoided(state, {
+      requirementId: requirement.id,
+      caseId: duplicate.caseId,
+      supplierActorId: command.declaredSupplierId,
+      avoidedBy: "DUPLICATE_CASE",
+      timestamp: iso(now),
+    });
     emit({
       type: "requirement.linked_existing_case",
       caseId: duplicate.caseId,
@@ -253,7 +287,15 @@ function openRequirement(
       timestamp: iso(now),
       detail: `Linked to existing case ${duplicate.caseId} instead of sending a duplicate request.`,
     });
-    return done(state, state.events.slice(-1), duplicate.caseId);
+    emit({
+      type: "SUPPLIER_CONTACT_AVOIDED",
+      caseId: duplicate.caseId,
+      actor: "SOURCE_SYSTEM",
+      timestamp: iso(now),
+      detail: "An open case already covers this subject and property.",
+      payload: { avoidedBy: "DUPLICATE_CASE", requirementId: requirement.id },
+    });
+    return done(state, state.events.slice(-2), duplicate.caseId);
   }
 
   if (!state.requirements.some((r) => r.id === requirement.id)) {
@@ -325,30 +367,70 @@ function openRequirement(
       timestamp: iso(now),
       detail: "Two probable matches. Evidence will not be auto-linked.",
     });
+    requirement.selectedRoute = "human_review";
+    requirement.selectedRouteReason = "We're not sure these are the same supplier.";
     return done(state, state.events.slice(-2), resolution.id);
   }
 
   resolution.state = "SEARCHING_EXISTING_DATA";
-  const claim = state.claims.find(
-    (c) => c.subjectId === requirement.subjectId && c.propertyId === requirement.propertyId
+  const plan = planResolution(
+    gatherPlannerInput({
+      state,
+      requirement,
+      identityMatched: identity.status === "IDENTITY_MATCHED",
+      identityNeedsReview: false,
+      declaredSupplierId: resolution.currentActorId,
+      now,
+    })
   );
-  const evidence = claim?.evidenceId ? state.evidence.find((e) => e.id === claim.evidenceId) : undefined;
-  const permission = claim ? state.permissions.find((p) => p.claimId === claim.id) : undefined;
-  const reuse = evaluateReuse({
-    requirement,
-    identityMatched: identity.status === "IDENTITY_MATCHED",
-    claim,
-    evidence,
-    permission,
-    now,
+  requirement.selectedRoute = plan.strategy;
+  requirement.selectedRouteReason = plan.reason;
+  emit({
+    type: "resolution.plan_selected",
+    caseId: resolution.id,
+    actor: "SOURCE_SYSTEM",
+    timestamp: iso(now),
+    detail: plan.reason,
+    payload: { strategy: plan.strategy },
   });
 
-  if (claim) claim.caseId = resolution.id;
-  if (reuse === "READY" && claim) {
-    markReady(state, resolution, claim, now, emit, "Existing claim reused without a new request.");
-    return done(state, state.events.filter((e) => e.caseId === resolution.id), resolution.id);
+  if (plan.candidateClaimId) {
+    const claim = state.claims.find((c) => c.id === plan.candidateClaimId);
+    if (claim) claim.caseId = resolution.id;
   }
-  if (reuse === "AUTHORIZATION_REQUIRED") {
+
+  if (plan.strategy === "exact_trusted_claim" && plan.candidateClaimId) {
+    const claim = state.claims.find((c) => c.id === plan.candidateClaimId)!;
+    recordContactAvoided(state, {
+      requirementId: requirement.id,
+      caseId: resolution.id,
+      supplierActorId: resolution.currentActorId,
+      avoidedBy: "EXISTING_CLAIM",
+      claimId: claim.id,
+      evidenceId: claim.evidenceId,
+      timestamp: iso(now),
+    });
+    emit({
+      type: "SUPPLIER_CONTACT_AVOIDED",
+      caseId: resolution.id,
+      actor: "SOURCE_SYSTEM",
+      timestamp: iso(now),
+      detail: plan.reason,
+      payload: { avoidedBy: "EXISTING_CLAIM" },
+    });
+    markReady(state, resolution, claim, now, emit, "Existing claim reused without a new request.", "EXISTING_CLAIM");
+    return done(state, state.events.filter((e) => e.caseId === resolution.id || e.type === "requirement.created" || e.type === "SUPPLIER_CONTACT_AVOIDED"), resolution.id);
+  }
+
+  if (plan.strategy === "authorization_only") {
+    recordContactAvoided(state, {
+      requirementId: requirement.id,
+      caseId: resolution.id,
+      supplierActorId: resolution.currentActorId,
+      avoidedBy: "AUTHORIZATION_ONLY",
+      claimId: plan.candidateClaimId,
+      timestamp: iso(now),
+    });
     resolution.state = "AUTHORIZATION_REQUIRED";
     fail(state, resolution, "AUTHORIZATION_REQUIRED", now, {
       nextAction: "Ask the supplier for a one-click grant.",
@@ -361,22 +443,57 @@ function openRequirement(
       timestamp: iso(now),
       detail: "Reusable claim found. Authorization still required.",
     });
-    return done(state, state.events.filter((e) => e.caseId === resolution.id), resolution.id);
-  }
-  if (reuse === "EXPIRED" && claim) {
-    resolution.state = "RENEWAL_REQUIRED";
-    fail(state, resolution, "EVIDENCE_EXPIRED", now, {
-      nextAction: "Request replacement evidence.",
-      nextActionAt: addDays(now, 7),
+    emit({
+      type: "SUPPLIER_CONTACT_AVOIDED",
+      caseId: resolution.id,
+      actor: "SOURCE_SYSTEM",
+      timestamp: iso(now),
+      detail: plan.reason,
+      payload: { avoidedBy: "AUTHORIZATION_ONLY" },
     });
-    return done(state, state.events.filter((e) => e.caseId === resolution.id), resolution.id);
+    return done(state, state.events.filter((e) => e.caseId === resolution.id || e.type === "requirement.created"), resolution.id);
+  }
+
+  if (plan.strategy === "existing_evidence" || plan.strategy === "internal_document_candidate") {
+    resolution.state = "VALIDATING";
+    resolution.nextAction = plan.reason;
+    return done(state, state.events.filter((e) => e.caseId === resolution.id || e.type === "requirement.created"), resolution.id);
+  }
+
+  if (plan.strategy === "cross_product_compatible") {
+    resolution.state = "SEARCHING_EXISTING_DATA";
+    resolution.nextAction = plan.reason;
+    state.tasks.push({
+      id: id(state, "task"),
+      caseId: resolution.id,
+      title: "Review whether a related claim applies here.",
+      context: plan.reason,
+      recommendedAction: "Confirm scope before reuse. Similar is not identical.",
+      ownerLabel: "Evidence reviewer",
+      status: "open",
+      createdAt: iso(now),
+      kind: "review",
+    });
+    return done(state, state.events.filter((e) => e.caseId === resolution.id || e.type === "requirement.created"), resolution.id);
   }
 
   resolution.state = "ROUTING";
-  if (!resolution.currentActorId) {
+  if (plan.strategy === "alternative_contact" || !resolution.currentActorId) {
     resolution.state = "REVIEW_ROUTING";
-    resolution.nextAction = "Review routing. Confidence is too low to send.";
+    resolution.nextAction = plan.reason || "Review routing. Confidence is too low to send.";
     return done(state, state.events.filter((e) => e.caseId === resolution.id), resolution.id);
+  }
+
+  if (plan.strategy === "human_review" || plan.strategy === "explained_unresolved") {
+    resolution.state = "REVIEW_ROUTING";
+    resolution.nextAction = plan.reason;
+    return done(state, state.events.filter((e) => e.caseId === resolution.id), resolution.id);
+  }
+
+  if (command.planOnly) {
+    resolution.state = "DETECTED";
+    resolution.nextAction = "SOURCE will attempt this after you let it handle the gaps.";
+    return done(state, state.events.filter((e) => e.caseId === resolution.id || e.type === "requirement.created"), resolution.id);
   }
 
   sendRequest(state, resolution.id, now, emit);
@@ -391,6 +508,60 @@ function sendRequest(
   contactId?: string
 ) {
   const resolution = caseById(state, caseId);
+  const requirement = requirementOf(state, resolution);
+  const plan = planResolution(
+    gatherPlannerInput({
+      state,
+      requirement,
+      identityMatched: resolution.identityStatus === "IDENTITY_MATCHED",
+      identityNeedsReview: false,
+      declaredSupplierId: resolution.currentActorId,
+      now,
+    })
+  );
+  if (plan.strategy === "exact_trusted_claim" && plan.candidateClaimId) {
+    const claim = state.claims.find((c) => c.id === plan.candidateClaimId);
+    if (claim) {
+      recordContactAvoided(state, {
+        requirementId: requirement.id,
+        caseId,
+        supplierActorId: resolution.currentActorId,
+        avoidedBy: "CONCURRENT_RESOLUTION",
+        claimId: claim.id,
+        timestamp: iso(now),
+      });
+      emit({
+        type: "SUPPLIER_CONTACT_AVOIDED",
+        caseId,
+        actor: "SOURCE_SYSTEM",
+        timestamp: iso(now),
+        detail: "A valid compatible claim existed before send.",
+        payload: { avoidedBy: "CONCURRENT_RESOLUTION" },
+      });
+      markReady(state, resolution, claim, now, emit, "Existing claim reused without a new request.", "EXISTING_CLAIM");
+      return;
+    }
+  }
+  if (plan.strategy === "authorization_only") {
+    recordContactAvoided(state, {
+      requirementId: requirement.id,
+      caseId,
+      supplierActorId: resolution.currentActorId,
+      avoidedBy: "AUTHORIZATION_ONLY",
+      claimId: plan.candidateClaimId,
+      timestamp: iso(now),
+    });
+    resolution.state = "AUTHORIZATION_REQUIRED";
+    emit({
+      type: "SUPPLIER_CONTACT_AVOIDED",
+      caseId,
+      actor: "SOURCE_SYSTEM",
+      timestamp: iso(now),
+      detail: plan.reason,
+      payload: { avoidedBy: "AUTHORIZATION_ONLY" },
+    });
+    return;
+  }
   const actorId = resolution.currentActorId;
   if (!actorId) return;
   const contacts = state.contacts.filter((c) => c.actorId === actorId);
@@ -986,7 +1157,7 @@ function submitResponse(
     return;
   }
 
-  const scopeMatch = !evidence || evidence.scope.id === requirement.subjectId || evidence.scope.kind === "product";
+  const scopeMatch = evidenceScopeApplies(evidence, requirement.subjectId);
   if (evidence && !scopeMatch) {
     writeClaim(state, resolution, requirement, command, evidence, now, "DECLARED");
     fail(state, resolution, "SCOPE_MISMATCH", now, {
@@ -1061,7 +1232,7 @@ function submitResponse(
     return;
   }
 
-  markReady(state, resolution, claim, now, emit, "Supplier provided value, evidence and permission.");
+  markReady(state, resolution, claim, now, emit, "Supplier provided value, evidence and permission.", "SUPPLIER_RESPONSE");
 }
 
 function writeClaim(
@@ -1124,11 +1295,19 @@ function markReady(
   claim: ClaimRecord,
   now: Date,
   emit: (e: Omit<AuditEvent, "id">) => void,
-  detail: string
+  detail: string,
+  mechanism: ResolutionMechanism = "EXISTING_CLAIM"
 ) {
   claim.ready = true;
   const requirement = requirementOf(state, resolution);
   requirement.resolvedAt = iso(now);
+  recordRequirementOutcome(state, {
+    requirementId: requirement.id,
+    mechanism,
+    claimId: claim.id,
+    evidenceId: claim.evidenceId,
+    recordedAt: iso(now),
+  });
   resolution.state = "READY";
   resolution.resolutionOutcome = "READY";
   resolution.closedAt = iso(now);
@@ -1195,7 +1374,7 @@ function setPermission(
       permissionRequired: true,
       conflict: state.conflicts.some((c) => c.caseId === caseId && !c.resolved),
     });
-    if (report.ready) markReady(state, resolution, claim, now, emit, "Authorization granted. Claim is reusable.");
+    if (report.ready) markReady(state, resolution, claim, now, emit, "Authorization granted. Claim is reusable.", "AUTHORIZATION");
   } else {
     claim.ready = false;
     resolution.state = "PERMISSION_CHECK";
@@ -1306,7 +1485,7 @@ function resolveConflict(
     if (grant) grant.state = "GRANTED";
     claim.permissionState = "GRANTED";
     claim.trustLevel = "EVIDENCED";
-    markReady(state, resolution, claim, now, emit, "Conflict adjudicated. Claim may return downstream.");
+    markReady(state, resolution, claim, now, emit, "Conflict adjudicated. Claim may return downstream.", "HUMAN_ENTRY");
   }
 }
 
@@ -1382,6 +1561,15 @@ function assignColleague(
   changeContact(state, caseId, created.id, now, emit);
 }
 
+function inferRelationKind(parentKind?: string, childKind?: string): SubjectRelationKind {
+  if (parentKind === "PRODUCT" && childKind === "PACKAGING") return "uses";
+  if ((parentKind === "MATERIAL" || parentKind === "COMPONENT") && childKind === "RAW_MATERIAL") return "derived_from";
+  if ((parentKind === "PRODUCT" || parentKind === "COMPONENT") && (childKind === "MATERIAL" || childKind === "RAW_MATERIAL")) {
+    return "made_of";
+  }
+  return "contains";
+}
+
 function addSubject(
   state: EngineState,
   command: Extract<Command, { type: "ADD_SUBJECT" }>,
@@ -1389,34 +1577,73 @@ function addSubject(
   emit: (e: Omit<AuditEvent, "id">) => void
 ) {
   const source = command.source ?? "USER_ADDED";
-  const subjectId = id(state, "sub");
-  state.subjects.push({
-    id: subjectId,
-    kind: command.kind,
-    name: command.name,
-    createdBy: command.createdBy ?? "user",
-    createdAt: iso(now),
-    source,
-    confidence: source === "USER_ADDED" ? 100 : source === "AI_EXTRACTED" ? 70 : 90,
-    sourceReference: source === "USER_ADDED" ? "manual_entry" : undefined,
-  });
-  if (command.parentSubjectId) {
-    state.subjectRelationships.push({
-      id: id(state, "srel"),
-      parentSubjectId: command.parentSubjectId,
-      childSubjectId: subjectId,
-      quantity: command.quantity,
-      unit: command.unit,
-      source,
+  const mapping = command.externalId
+    ? state.tenantSubjectMappings.find(
+        (m) => m.sourceRecordId === command.externalId && m.tenantId === state.tenant.id && m.decision !== "rejected"
+      )
+    : undefined;
+  const subjectId = mapping?.canonicalSubjectId ?? id(state, "sub");
+  if (!mapping) {
+    state.subjects.push({
+      id: subjectId,
+      kind: command.kind,
+      name: command.name,
       createdBy: command.createdBy ?? "user",
       createdAt: iso(now),
+      source,
+      confidence: source === "USER_ADDED" ? 100 : source === "AI_EXTRACTED" ? 70 : 90,
+      sourceReference: command.sourceReference ?? (source === "USER_ADDED" ? "manual_entry" : undefined),
     });
+    if (command.externalId) {
+      state.tenantSubjectMappings.push({
+        id: id(state, "map"),
+        tenantId: state.tenant.id,
+        sourceSystem: "import",
+        sourceRecordId: command.externalId,
+        canonicalSubjectId: subjectId,
+        matchMethod: "deterministic",
+        confidence: 100,
+        decision: "created",
+        modelVersion: IDENTITY_ENGINE_VERSION,
+        createdAt: iso(now),
+      });
+    }
+  }
+  for (const ident of command.identifiers ?? []) {
+    if (!state.subjectIdentifiers.some((row) => row.canonicalSubjectId === subjectId && row.scheme === ident.scheme && row.value === ident.value)) {
+      state.subjectIdentifiers.push({
+        id: id(state, "sid"),
+        canonicalSubjectId: subjectId,
+        scheme: ident.scheme,
+        value: ident.value,
+      });
+    }
+  }
+  if (command.parentSubjectId) {
+    const parent = state.subjects.find((s) => s.id === command.parentSubjectId);
+    const child = state.subjects.find((s) => s.id === subjectId);
+    const already = state.subjectRelationships.some(
+      (r) => r.parentSubjectId === command.parentSubjectId && r.childSubjectId === subjectId
+    );
+    if (!already) {
+      state.subjectRelationships.push({
+        id: id(state, "srel"),
+        parentSubjectId: command.parentSubjectId,
+        childSubjectId: subjectId,
+        kind: command.relationshipKind ?? inferRelationKind(parent?.kind, child?.kind),
+        quantity: command.quantity,
+        unit: command.unit,
+        source,
+        createdBy: command.createdBy ?? "user",
+        createdAt: iso(now),
+      });
+    }
   }
   emit({
     type: "subject.added",
     actor: command.createdBy ?? "user",
     timestamp: iso(now),
-    detail: `Added ${command.kind.toLowerCase()} ${command.name} (${source}).`,
+    detail: mapping ? `Mapped ${command.kind.toLowerCase()} ${command.name} to existing subject.` : `Added ${command.kind.toLowerCase()} ${command.name} (${source}).`,
     payload: { source, kind: command.kind },
   });
 
@@ -1446,11 +1673,134 @@ function addSubject(
     };
     openRequirement(
       state,
-      { type: "OPEN_REQUIREMENT", requirement, declaredSupplierId: command.supplierId },
+      {
+        type: "OPEN_REQUIREMENT",
+        requirement,
+        declaredSupplierId: command.supplierId,
+        planOnly: command.planOnly,
+      },
       now,
       emit
     );
   }
+}
+
+function mergeSubjects(
+  state: EngineState,
+  command: Extract<Command, { type: "MERGE_SUBJECTS" }>,
+  now: Date,
+  emit: (e: Omit<AuditEvent, "id">) => void
+) {
+  const from = state.subjects.find((s) => s.id === command.fromSubjectId);
+  const to = state.subjects.find((s) => s.id === command.toSubjectId);
+  if (!from || !to || from.id === to.id) return;
+  for (const rel of state.subjectRelationships) {
+    if (rel.parentSubjectId === from.id) rel.parentSubjectId = to.id;
+    if (rel.childSubjectId === from.id) rel.childSubjectId = to.id;
+  }
+  for (const ident of state.subjectIdentifiers) {
+    if (ident.canonicalSubjectId === from.id) ident.canonicalSubjectId = to.id;
+  }
+  for (const mapping of state.tenantSubjectMappings) {
+    if (mapping.canonicalSubjectId === from.id) mapping.canonicalSubjectId = to.id;
+  }
+  for (const requirement of state.requirements) {
+    if (requirement.subjectId === from.id) {
+      requirement.subjectId = to.id;
+      requirement.subjectLabel = to.name;
+      requirement.productIds = productIdsForSubject(to.id, state.subjects, state.subjectRelationships);
+    }
+  }
+  for (const claim of state.claims) {
+    if (claim.subjectId === from.id) claim.subjectId = to.id;
+  }
+  state.subjects = state.subjects.filter((s) => s.id !== from.id);
+  state.identityDecisions.push({
+    id: id(state, "idec"),
+    tenantId: state.tenant.id,
+    subject: "canonical_subject",
+    query: from.name,
+    decision: "merge",
+    fromIds: [from.id],
+    toId: to.id,
+    decidedBy: command.createdBy ?? "reviewer",
+    modelVersion: IDENTITY_ENGINE_VERSION,
+    createdAt: iso(now),
+  });
+  emit({
+    type: "identity.resolved",
+    actor: command.createdBy ?? "reviewer",
+    timestamp: iso(now),
+    detail: `Merged ${from.name} into ${to.name}. Confirming this unlocks requirements on the canonical subject.`,
+    payload: { from: from.id, to: to.id },
+  });
+}
+
+function splitSubject(
+  state: EngineState,
+  command: Extract<Command, { type: "SPLIT_SUBJECT" }>,
+  now: Date,
+  emit: (e: Omit<AuditEvent, "id">) => void
+) {
+  const original = state.subjects.find((s) => s.id === command.subjectId);
+  if (!original) return;
+  const created = {
+    id: id(state, "sub"),
+    kind: original.kind,
+    name: command.newName,
+    createdBy: command.createdBy ?? "user",
+    createdAt: iso(now),
+    source: "USER_ADDED" as const,
+    confidence: 100,
+    sourceReference: "split",
+  };
+  state.subjects.push(created);
+  for (const rel of state.subjectRelationships) {
+    if (command.moveRelationshipIds?.includes(rel.id)) {
+      if (rel.parentSubjectId === original.id) rel.parentSubjectId = created.id;
+      if (rel.childSubjectId === original.id) rel.childSubjectId = created.id;
+    }
+  }
+  state.identityDecisions.push({
+    id: id(state, "idec"),
+    tenantId: state.tenant.id,
+    subject: "canonical_subject",
+    query: original.name,
+    decision: "split",
+    fromIds: [original.id],
+    toId: created.id,
+    decidedBy: command.createdBy ?? "reviewer",
+    modelVersion: IDENTITY_ENGINE_VERSION,
+    createdAt: iso(now),
+  });
+  emit({
+    type: "identity.resolved",
+    actor: command.createdBy ?? "reviewer",
+    timestamp: iso(now),
+    detail: `Split ${original.name} → ${created.name}.`,
+  });
+}
+
+function bulkCorrectSubjects(
+  state: EngineState,
+  command: Extract<Command, { type: "APPLY_BULK_SUBJECT_CORRECTION" }>,
+  now: Date,
+  emit: (e: Omit<AuditEvent, "id">) => void
+) {
+  let count = 0;
+  for (const rel of state.subjectRelationships) {
+    if (rel.childSubjectId !== command.matchChildSubjectId) continue;
+    rel.childSubjectId = command.replaceChildSubjectId;
+    rel.source = "USER_ADDED";
+    count += 1;
+  }
+  emit({
+    type: "subject.relationship_corrected",
+    actor: command.createdBy ?? "user",
+    timestamp: iso(now),
+    detail: `Applied correction to ${count} matching occurrences.`,
+    payload: { count },
+  });
 }
 
 function correctSubjectRelationship(
@@ -1493,7 +1843,7 @@ export function caseReadiness(state: EngineState, caseId: string) {
     requiredTrustLevel: requirement.requiredTrustLevel,
     evidence,
     evidenceRequired: requirement.requiredTrustLevel !== "DECLARED",
-    scopeMatch: !evidence || evidence.scope.id === requirement.subjectId || evidence.scope.kind === "product",
+    scopeMatch: evidenceScopeApplies(evidence, requirement.subjectId),
     permission: permission?.state ?? claim?.permissionState ?? "UNKNOWN",
     permissionDecision: evaluatePermission({
       storedState: permission?.state ?? claim?.permissionState ?? "UNKNOWN",

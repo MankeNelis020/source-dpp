@@ -13,3 +13,8 @@ export * from "./reuse";
 export * from "./engine";
 export * from "./queries";
 export * from "./seed";
+export * from "./analytics";
+export * from "./pilot-dataset";
+export * from "./subject-identity";
+export * from "./normalize";
+export * from "./extractor";

@@ -98,6 +98,41 @@ export type AssignmentSource =
   | "AI_EXTRACTED"
   | "SYSTEM_INFERRED";
 
+/** Lineage of a derived value or relationship. Broader than AssignmentSource. */
+export type ProvenanceKind =
+  | AssignmentSource
+  | "NORMALIZED"
+  | "DETERMINISTIC_MATCH"
+  | "HEURISTIC_MATCH"
+  | "USER_CONFIRMED"
+  | "DOCUMENT_EXTRACTED";
+
+export type SubjectRelationKind = "contains" | "made_of" | "derived_from" | "uses";
+
+export type SubjectMatchDecision = "MATCHED" | "PROBABLE_MATCH" | "AMBIGUOUS" | "NO_MATCH" | "REJECTED_MATCH";
+
+export type ResolutionMechanism =
+  | "ALREADY_PRESENT"
+  | "NORMALIZED_EXISTING_DATA"
+  | "EXISTING_CLAIM"
+  | "EVIDENCE_EXTRACTION"
+  | "SAME_TENANT_REUSE"
+  | "CROSS_TENANT_REUSE"
+  | "AUTHORIZATION"
+  | "SUPPLIER_RESPONSE"
+  | "UPSTREAM_RESPONSE"
+  | "HUMAN_ENTRY";
+
+export type ContactAvoidedBy =
+  | "EXISTING_CLAIM"
+  | "PROPAGATION"
+  | "EVIDENCE_FOUND"
+  | "DUPLICATE_CASE"
+  | "AUTHORIZATION_ONLY"
+  | "CONCURRENT_RESOLUTION";
+
+export type MappingConfidence = "high" | "review" | "unknown";
+
 /** Current actor/subject matcher is a prototype. Do not present scores as calibrated probabilities. */
 export const IDENTITY_ENGINE_VERSION = "heuristic-v0" as const;
 export type IdentityEngineVersion = typeof IDENTITY_ENGINE_VERSION;
@@ -264,6 +299,7 @@ export interface InformationRequirement {
   propertyId: string;
   propertyLabel: string;
   datasetId: string;
+  datasetVersion?: string;
   purpose: Purpose;
   requiredTrustLevel: TrustLevel;
   requiredPermissionLevel: "granted" | "not_required";
@@ -272,6 +308,10 @@ export interface InformationRequirement {
   createdAt: string;
   resolvedAt?: string;
   linkedCaseId?: string;
+  resolutionMechanism?: ResolutionMechanism;
+  resolvedByClaimId?: string;
+  selectedRoute?: string;
+  selectedRouteReason?: string;
 }
 
 export interface ResolutionCase {
@@ -481,6 +521,7 @@ export interface SubjectRelationship {
   id: string;
   parentSubjectId: string;
   childSubjectId: string;
+  kind?: SubjectRelationKind;
   quantity?: number;
   unit?: string;
   source: AssignmentSource;
@@ -545,8 +586,82 @@ export interface EngineState {
   subjectIdentifiers: SubjectIdentifier[];
   tenantSubjectMappings: TenantSubjectMapping[];
   identityDecisions: IdentityDecision[];
+  requirementOutcomes: RequirementOutcome[];
+  contactAvoidances: SupplierContactAvoided[];
+  pilotRuns: PilotRun[];
+  requestGroups: RequestGroup[];
   tenant: { id: string; name: string; identityAutoLinkThreshold: number };
   seq: number;
+}
+
+export interface RequirementOutcome {
+  requirementId: string;
+  mechanism: ResolutionMechanism;
+  claimId?: string;
+  evidenceId?: string;
+  recordedAt: string;
+}
+
+export interface SupplierContactAvoided {
+  id: string;
+  requirementId: string;
+  caseId?: string;
+  supplierActorId?: string;
+  avoidedBy: ContactAvoidedBy;
+  claimId?: string;
+  evidenceId?: string;
+  timestamp: string;
+}
+
+export interface PilotSnapshot {
+  capturedAt: string;
+  totalProducts: number;
+  totalSubjects: number;
+  totalSuppliers: number;
+  totalRequirements: number;
+  alreadyReady: number;
+  missing: number;
+  conflicted: number;
+  identityUncertain: number;
+  evidenceMissing: number;
+  permissionBlocked: number;
+  requirementIds: string[];
+  missingRequirementIds: string[];
+}
+
+export interface CostTelemetry {
+  extractionCalls: number;
+  documentsProcessed: number;
+  emailsQueued: number;
+  backgroundJobs: number;
+  storageBytes: number;
+  humanReviews: number;
+  aggregateBytes?: number;
+  commandDurationMs?: number;
+  importDurationMs?: number;
+  plannerDurationMs?: number;
+  propagationDurationMs?: number;
+}
+
+export interface PilotRun {
+  id: string;
+  organisationId: string;
+  datasetId: string;
+  datasetVersion: string;
+  importJobId?: string;
+  startedAt: string;
+  completedAt?: string;
+  baseline: PilotSnapshot;
+  final?: PilotSnapshot;
+  cost?: CostTelemetry;
+}
+
+export interface RequestGroup {
+  id: string;
+  supplierActorId: string;
+  propertyId: string;
+  caseIds: string[];
+  createdAt: string;
 }
 
 export type Command =
@@ -554,7 +669,8 @@ export type Command =
       type: "OPEN_REQUIREMENT";
       requirement: InformationRequirement;
       declaredSupplierId?: string;
-      identityQuery?: { name?: string; vat?: string; country?: string };
+      identityQuery?: { name?: string; vat?: string; country?: string; lei?: string; domain?: string };
+      planOnly?: boolean;
     }
   | { type: "SEND_REQUEST"; caseId: string; contactId?: string }
   | { type: "TICK_NO_RESPONSE"; caseId: string }
@@ -611,6 +727,30 @@ export type Command =
       source?: AssignmentSource;
       createdBy?: string;
       generateRequirements?: boolean;
+      planOnly?: boolean;
+      externalId?: string;
+      sourceReference?: string;
+      relationshipKind?: SubjectRelationKind;
+      identifiers?: { scheme: SubjectIdentifier["scheme"]; value: string }[];
+    }
+  | {
+      type: "MERGE_SUBJECTS";
+      fromSubjectId: string;
+      toSubjectId: string;
+      createdBy?: string;
+    }
+  | {
+      type: "SPLIT_SUBJECT";
+      subjectId: string;
+      newName: string;
+      moveRelationshipIds?: string[];
+      createdBy?: string;
+    }
+  | {
+      type: "APPLY_BULK_SUBJECT_CORRECTION";
+      matchChildSubjectId: string;
+      replaceChildSubjectId: string;
+      createdBy?: string;
     }
   | {
       type: "CORRECT_SUBJECT_RELATIONSHIP";

@@ -203,14 +203,44 @@ export interface ImportJob {
   startedAt?: string;
   completedAt?: string;
   mapping: Record<string, string>;
+  mappingConfidence?: Record<string, "high" | "review" | "unknown">;
+  rawRecords?: RawImportRecord[];
   summary?: {
     products: number;
     suppliers: number;
     relationships: number;
+    materials?: number;
     requirements: number;
     autoResolvable: number;
     needsAttention: number;
+    autoMapped?: number;
+    reviewRows?: number;
+    warningRows?: number;
+    errorRows?: number;
   };
+}
+
+export interface RawImportRecord {
+  id: string;
+  importJobId: string;
+  sourceFile: string;
+  sheet?: string;
+  row: number;
+  raw: Record<string, string>;
+  normalized: Record<string, string>;
+  mappingVersion: string;
+  status: "accepted" | "warning" | "error" | "review";
+  createdAt: string;
+}
+
+export interface ImportMappingProfile {
+  id: string;
+  organisationId: string;
+  sourceFormat: string;
+  mapping: Record<string, string>;
+  mappingVersion: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ImportJobEvent {

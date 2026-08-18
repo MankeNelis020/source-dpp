@@ -11,8 +11,12 @@ import {
   getSupplierPortalView,
   getWorkspaceOverview,
   searchTenant,
+  getPilotResults,
+  getMaterialDetail,
+  getSupplierOverview,
 } from "@/server/source/queries";
 import { createImportJob, getImportProgress } from "@/server/source/import/service";
+import { executeResolutionRun } from "@/server/source/resolution-run";
 
 export const sourceApp = {
   store: () => getPersistence(),
@@ -30,4 +34,8 @@ export const sourceApp = {
   searchTenant,
   createImportJob,
   getImportProgress,
+  getPilotResults,
+  getMaterialDetail,
+  getSupplierOverview,
+  executeResolutionRun,
 };

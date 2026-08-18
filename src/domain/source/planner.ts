@@ -1,5 +1,6 @@
-import type { AttemptMethod } from "./types";
+import type { AttemptMethod, EngineState } from "./types";
 import { evaluateReuse } from "./reuse";
+import { findActiveDuplicate } from "./reuse";
 import type { ReuseOutcome } from "./types";
 import type { ClaimRecord, EvidenceRecord, InformationRequirement, PermissionGrant, ResolutionCase } from "./types";
 
@@ -167,4 +168,63 @@ export function planResolution(input: PlannerInput): ResolutionPlan {
     requiresHumanReview: true,
     expectedActions: ["human_review"],
   };
+}
+
+export function gatherPlannerInput(args: {
+  state: EngineState;
+  requirement: InformationRequirement;
+  identityMatched: boolean;
+  identityNeedsReview: boolean;
+  declaredSupplierId?: string;
+  now: Date;
+}): PlannerInput {
+  const { state, requirement, now } = args;
+  const duplicate = findActiveDuplicate({
+    requirements: state.requirements.filter((row) => row.id !== requirement.id),
+    subjectId: requirement.subjectId,
+    propertyId: requirement.propertyId,
+    actorId: args.declaredSupplierId,
+    cases: state.cases.filter((row) => row.requirementId !== requirement.id),
+  });
+  const claim = state.claims.find(
+    (c) => c.subjectId === requirement.subjectId && c.propertyId === requirement.propertyId
+  );
+  const evidence = claim?.evidenceId
+    ? state.evidence.find((e) => e.id === claim.evidenceId)
+    : state.evidence.find((e) => e.scope.id === requirement.subjectId && !e.expired);
+  const permission = claim ? state.permissions.find((p) => p.claimId === claim.id) : undefined;
+  const relatedIds = new Set<string>([requirement.subjectId]);
+  for (const rel of state.subjectRelationships) {
+    if (rel.parentSubjectId === requirement.subjectId) relatedIds.add(rel.childSubjectId);
+    if (rel.childSubjectId === requirement.subjectId) relatedIds.add(rel.parentSubjectId);
+  }
+  const crossProductClaim = state.claims.find(
+    (c) =>
+      c.propertyId === requirement.propertyId &&
+      c.subjectId !== requirement.subjectId &&
+      relatedIds.has(c.subjectId) &&
+      c.ready
+  );
+  const contacts = args.declaredSupplierId
+    ? state.contacts.filter((c) => c.actorId === args.declaredSupplierId && c.valid)
+    : [];
+  return {
+    requirement,
+    identityMatched: args.identityMatched,
+    identityNeedsReview: args.identityNeedsReview,
+    declaredSupplierId: args.declaredSupplierId,
+    claim,
+    evidence,
+    permission,
+    duplicateCaseId: duplicate?.caseId,
+    crossProductClaim,
+    internalDocumentId: evidence && !claim ? evidence.id : undefined,
+    hasValidContact: contacts.length > 0,
+    now,
+    openCases: state.cases,
+  };
+}
+
+export function explainPlan(plan: ResolutionPlan): string {
+  return `Selected route: ${plan.strategy.replaceAll("_", " ")}\nReason: ${plan.reason}`;
 }

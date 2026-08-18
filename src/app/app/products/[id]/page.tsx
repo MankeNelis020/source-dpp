@@ -23,18 +23,21 @@ const TABS = ["Overview", "Components", "Claims", "Evidence", "History"] as cons
 
 export default function ProductDetailPage() {
   const params = useParams<{ id: string }>();
-  const product = productById(params.id);
   const [tab, setTab] = useState<(typeof TABS)[number]>("Overview");
   const [openClaim, setOpenClaim] = useState<string | null>(null);
   const [materialName, setMaterialName] = useState("");
   const dispatch = useDispatchCommand();
-  const { data: live } = useSourceQuery<{
+  const { data: live, loading } = useSourceQuery<{
     id: string;
     name: string;
+    buckets?: Record<string, number>;
+    requirements?: { id: string; propertyLabel: string; state?: string; selectedRouteReason?: string }[];
     children: { id: string; name: string; kind?: string; source?: string; confidence?: number }[];
     blockers: { caseId: string; property: string; actorLabel: string; reason?: string; state: string }[];
   }>(`/api/source/products/${params.id}`);
-  if (!product) notFound();
+  const product = productById(params.id) ?? (live ? { id: live.id, name: live.name, sku: live.id, status: "missing" as const, completeness: 0, evidence: 0 } : undefined);
+  if (!product && !loading) notFound();
+  if (!product) return <p className="text-[13px] text-[#101A15]/55">Loading product…</p>;
   const claims = claimsForProduct(product.id);
   const selected = claims.find((c) => c.id === openClaim);
   const blockers = live?.blockers ?? [];
