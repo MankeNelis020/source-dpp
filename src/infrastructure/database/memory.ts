@@ -230,11 +230,17 @@ export class MemoryPersistence implements PersistencePort {
   getOrganisationBySlug(slug: string) {
     return [...this.organisations.values()].find((o) => o.slug === slug);
   }
+  saveOrganisation(org: Organisation) {
+    this.organisations.set(org.id, { ...org });
+  }
   getUserById(id: string) {
     return this.users.get(id);
   }
   getUserByEmail(email: string) {
-    return [...this.users.values()].find((u) => u.email === email.toLowerCase());
+    return [...this.users.values()].find((u) => u.email.toLowerCase() === email.toLowerCase());
+  }
+  saveUser(user: UserRecord) {
+    this.users.set(user.id, { ...user });
   }
   getMembership(userId: string, organisationId: string) {
     return this.memberships.find((m) => m.userId === userId && m.organisationId === organisationId);
@@ -242,13 +248,18 @@ export class MemoryPersistence implements PersistencePort {
   listMemberships(userId: string) {
     return this.memberships.filter((m) => m.userId === userId);
   }
+  saveMembership(membership: Membership) {
+    const idx = this.memberships.findIndex(
+      (m) => m.userId === membership.userId && m.organisationId === membership.organisationId
+    );
+    if (idx >= 0) this.memberships[idx] = { ...membership };
+    else this.memberships.push({ ...membership });
+  }
   loadEngine(organisationId: string) {
     const state = this.engines.get(organisationId);
     if (!state) {
-      const empty = emptyState();
-      empty.tenant.id = organisationId;
-      this.engines.set(organisationId, empty);
-      return structuredClone(empty);
+      const org = this.organisations.get(organisationId);
+      return emptyState({ id: organisationId, name: org?.name ?? organisationId });
     }
     return hydrateEngineState(structuredClone(state));
   }

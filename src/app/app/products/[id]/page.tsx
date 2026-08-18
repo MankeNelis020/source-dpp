@@ -216,7 +216,7 @@ export default function ProductDetailPage() {
               <SourceLabel>Product</SourceLabel>
               <Meta k="Manufacturer" v="Acme Manufacturing B.V." />
               <Meta k="SKU" v={product.sku} />
-              <Meta k="GTIN" v={product.gtin ?? "—"} />
+              <Meta k="GTIN" v={"gtin" in product ? product.gtin ?? "—" : "—"} />
               <Meta k="Dataset" v="ESPR - Aluminium v2027" />
               <Meta k="Evidence coverage" v={`${product.evidence}%`} />
               <Meta k="Last updated" v="15 Aug 2026" />

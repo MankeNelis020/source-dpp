@@ -104,7 +104,7 @@ export function evaluatePropagationCandidate(args: {
 
   const scopeMatch = evidenceScopeApplies(args.evidence, args.requirement.subjectId);
   const report = evaluateReadiness({
-    identity: { matched: args.identityMatched !== false, confidence: args.claim.identityConfidence, autoLinkThreshold: 95 },
+    identity: { matched: args.identityMatched ?? true, confidence: args.claim.identityConfidence, autoLinkThreshold: 95 },
     valuePresent: Boolean(args.claim.value),
     trustLevel: args.claim.trustLevel,
     requiredTrustLevel: args.requirement.requiredTrustLevel,

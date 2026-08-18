@@ -5,7 +5,7 @@ import { applyMigrations } from "./migrate";
 import { ROLE_CAPABILITIES } from "@/server/source/authorization";
 
 export function requireDatabaseUrl() {
-  const url = process.env.DATABASE_URL;
+  const url = process.env.SOURCE_MIGRATOR_DATABASE_URL ?? process.env.DATABASE_URL;
   if (!url) {
     if (process.env.CI || process.env.SOURCE_REQUIRE_POSTGRES === "1") {
       throw new Error("DATABASE_URL is required for Postgres integration tests. Refusing to skip isolation tests.");
@@ -15,6 +15,14 @@ export function requireDatabaseUrl() {
   return url;
 }
 
+export function runtimeAppDatabaseUrl(migratorUrl: string) {
+  if (process.env.SOURCE_APP_DATABASE_URL) return process.env.SOURCE_APP_DATABASE_URL;
+  const parsed = new URL(migratorUrl);
+  parsed.username = "source_app";
+  parsed.password = "source_app_dev_only";
+  return parsed.toString();
+}
+
 export async function createMigratorPool() {
   const url = requireDatabaseUrl();
   if (!url) return undefined;
@@ -22,9 +30,9 @@ export async function createMigratorPool() {
 }
 
 export async function createAppPool() {
-  const url = process.env.SOURCE_APP_DATABASE_URL ?? requireDatabaseUrl();
-  if (!url) return undefined;
-  return new Pool({ connectionString: url });
+  const migrator = requireDatabaseUrl();
+  if (!migrator) return undefined;
+  return new Pool({ connectionString: runtimeAppDatabaseUrl(migrator) });
 }
 
 export async function resetAndSeedPostgres(migrator: Pool) {

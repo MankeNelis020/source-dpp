@@ -54,10 +54,13 @@ export type MaybePromise<T> = T | Promise<T>;
 export interface PersistencePort {
   getOrganisation(id: string): MaybePromise<Organisation | undefined>;
   getOrganisationBySlug(slug: string): MaybePromise<Organisation | undefined>;
+  saveOrganisation(org: Organisation): MaybePromise<void>;
   getUserById(id: string): MaybePromise<UserRecord | undefined>;
   getUserByEmail(email: string): MaybePromise<UserRecord | undefined>;
+  saveUser(user: UserRecord): MaybePromise<void>;
   getMembership(userId: string, organisationId: string): MaybePromise<Membership | undefined>;
   listMemberships(userId: string): MaybePromise<Membership[]>;
+  saveMembership(membership: Membership): MaybePromise<void>;
 
   loadEngine(organisationId: string): MaybePromise<EngineState>;
   saveEngine(organisationId: string, state: EngineState): MaybePromise<void>;

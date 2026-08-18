@@ -153,6 +153,7 @@ export type CommandErrorCode =
   | "RESOURCE_UNAVAILABLE"
   | "CASE_CHANGED"
   | "VALIDATION"
+  | "CONFLICT"
   | "RATE_LIMITED"
   | "EXPIRED"
   | "REVOKED";
