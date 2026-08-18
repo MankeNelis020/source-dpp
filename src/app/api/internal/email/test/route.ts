@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     const body = (await request.json().catch(() => ({}))) as { to?: string };
     const to = normalizeEmail(body.to);
     if (!to) throw new SourceError("VALIDATION", "A valid allow-listed recipient is required.", 400);
-    const allow = env.emailAllowedRecipients;
+    const allow = env.emailAllowedRecipients ?? [];
     if (allow.length && !recipientAllowed(to, allow)) {
       throw new SourceError("FORBIDDEN", "Recipient is not allow-listed.", 403);
     }
