@@ -247,6 +247,23 @@ Safe health payload (`GET /api/health`):
 
 No DSNs, roles, bucket secrets, or service-role material. Storage `error` is reported; it does not by itself mark evidence invalid. Database failure still returns 503.
 
+### Hosted Postgres diagnostics (operational, safe to retain)
+
+When the runtime health check cannot connect or a health query fails, SOURCE logs one JSON line to server logs (`console.error`). This is fail-closed observability, not a public API. `/api/health` stays generic.
+
+Allow-listed fields only:
+
+- PostgreSQL or Node error `code` (for example `28P01`, `SELF_SIGNED_CERT_IN_CHAIN`, `ETIMEDOUT`)
+- sanitized error `message`
+- `phase`: `connect` or `query` when known
+- configured `host` (hostname only) and `port`
+- parsed database `user`
+- `sourceEnv`
+
+Passwords, full DSNs, CA PEMs, secret query parameters, and service-role keys are redacted and must not appear. TLS remains `rejectUnauthorized: true`. SOURCE does not rewrite `SOURCE_APP_DATABASE_URL` or switch ports.
+
+Application code does not branch on `5432` vs `6543`. Runtime Pool settings, `SET LOCAL` in transactions, and health queries are the same. Port `6543` on the Shared Pooler is still the intended serverless runtime (transaction mode). Port `5432` is session/direct and is documented for the migrator. Changing the DSN port is an operator experiment; read the logged `code` / `phase` / `host` / `port` before changing pooling.
+
 Production boots against an **empty** database. Seeded Acme / Nordic / demo portal tokens are for tests and `npm run db:seed` (local only). A new organisation may have no `engine_states` row; the first load returns valid empty SOURCE state; the first mutation persists the aggregate (JSONB `engine_states` per organisation).
 
 ---

@@ -1,6 +1,11 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { SourceEnvironmentError } from "@/infrastructure/environment/source-environment";
 import type { PersistenceAdapterKind } from "@/infrastructure/environment/source-environment";
+import {
+  logPostgresHealthFailure,
+  safePostgresFailureDiagnostics,
+  type PostgresConnectionPhase,
+} from "@/infrastructure/database/postgres-diagnostics";
 
 export interface PersistenceHealth {
   database: "ok" | "error";
@@ -10,9 +15,22 @@ export interface PersistenceHealth {
   outboxBacklog?: number;
 }
 
-export async function checkPostgresHealth(pool: Pool): Promise<PersistenceHealth> {
-  const client = await pool.connect();
+export type PostgresHealthContext = {
+  connectionString?: string;
+  sourceEnv?: string;
+};
+
+export async function checkPostgresHealth(
+  pool: Pool,
+  context: PostgresHealthContext = {}
+): Promise<PersistenceHealth> {
+  const connectionString = context.connectionString ?? pool.options?.connectionString;
+  const sourceEnv = context.sourceEnv;
+  let phase: PostgresConnectionPhase = "connect";
+  let client: PoolClient | undefined;
   try {
+    client = await pool.connect();
+    phase = "query";
     await client.query("SELECT 1");
     const role = await client.query<{ u: string }>("SELECT current_user AS u");
     if (role.rows[0]?.u !== "source_app") {
@@ -36,10 +54,18 @@ export async function checkPostgresHealth(pool: Pool): Promise<PersistenceHealth
     await client.query("SELECT 1 FROM outbound_messages LIMIT 0");
     return { database: "ok", persistence: "postgres", storage: "ok" };
   } catch (error) {
+    logPostgresHealthFailure(
+      safePostgresFailureDiagnostics({
+        error,
+        phase,
+        connectionString,
+        sourceEnv,
+      })
+    );
     if (error instanceof SourceEnvironmentError) throw error;
     throw new SourceEnvironmentError("SOURCE persistence health check failed: database unreachable.");
   } finally {
-    client.release();
+    client?.release();
   }
 }
 
