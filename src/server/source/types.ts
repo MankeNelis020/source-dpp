@@ -191,7 +191,9 @@ export type CommandErrorCode =
   | "CONFLICT"
   | "RATE_LIMITED"
   | "EXPIRED"
-  | "REVOKED";
+  | "REVOKED"
+  | "FILE_TYPE_NOT_ALLOWED"
+  | "STORAGE_UNAVAILABLE";
 
 export class SourceError extends Error {
   constructor(
@@ -241,6 +243,18 @@ export interface ImportJob {
   mapping: Record<string, string>;
   mappingConfidence?: Record<string, "high" | "review" | "unknown">;
   rawRecords?: RawImportRecord[];
+  sourceStorageObjectIds?: {
+    products?: string;
+    suppliers?: string;
+    bom?: string;
+    materials?: string;
+  };
+  sourceFiles?: Partial<
+    Record<
+      "products" | "suppliers" | "bom" | "materials",
+      { filename: string; sizeBytes: number; storageObjectId: string; mimeType?: string }
+    >
+  >;
   summary?: {
     products: number;
     suppliers: number;

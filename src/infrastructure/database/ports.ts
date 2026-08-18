@@ -13,12 +13,16 @@ import type {
   UserRecord,
 } from "@/server/source/types";
 import type { OutboxRecord, OutboxStatus } from "@/infrastructure/outbox/types";
+import type { StorageObjectRecord } from "@/infrastructure/storage/port";
+
+export type { StorageObjectRecord } from "@/infrastructure/storage/port";
 
 export interface EvidenceObject {
   evidenceId: string;
   ownerActorId: string;
   organisationId?: string;
   storageKey: string;
+  storageObjectId?: string;
   sha256: string;
   mimeType: string;
   size: number;
@@ -29,6 +33,9 @@ export interface EvidenceObject {
   validFrom?: string;
   validUntil?: string;
   visibility: string;
+  availability?: string;
+  supersedesEvidenceId?: string;
+  uploadedViaPortalGrantId?: string;
   bytes?: Uint8Array;
 }
 
@@ -99,6 +106,11 @@ export interface PersistencePort {
   putEvidence(object: EvidenceObject): MaybePromise<void>;
   getEvidence(evidenceId: string): MaybePromise<EvidenceObject | undefined>;
 
+  saveStorageObject(object: StorageObjectRecord): MaybePromise<void>;
+  getStorageObject(id: string): MaybePromise<StorageObjectRecord | undefined>;
+  listStorageObjects(organisationId: string): MaybePromise<StorageObjectRecord[]>;
+  listExpiredTemporaryUploads(now?: Date): MaybePromise<StorageObjectRecord[]>;
+
   nextId(prefix: string): string;
 
   transaction<T>(fn: (tx: PersistencePort) => Promise<T> | T): Promise<T>;
@@ -137,11 +149,6 @@ export interface EmailPort {
     html?: string;
     idempotencyKey: string;
   }): Promise<"SENT" | "ALREADY_PROCESSED">;
-}
-
-export interface ObjectStoragePort {
-  putImmutable(input: { key: string; bytes: Uint8Array; sha256: string; mimeType: string }): Promise<void>;
-  signGet(key: string, ttlSeconds: number): Promise<string>;
 }
 
 export class MemoryEmailPort implements EmailPort {

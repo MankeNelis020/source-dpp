@@ -53,14 +53,19 @@ describe("structured disclosure", () => {
       code: "RESOURCE_UNAVAILABLE",
     });
     const nordic = await resolveUserPrincipal(store, "user-nordic-owner", "nordic");
-    await expect(getEvidenceAccess(store, nordic, "ev-nordic-private")).rejects.toMatchObject({
-      code: "RESOURCE_UNAVAILABLE",
-    });
+    const attest = await getEvidenceAccess(store, nordic, "ev-nordic-private");
+    expect(attest.type).toBe("EVIDENCE_ATTESTATION");
+    expect(JSON.stringify(attest)).not.toContain("signedUrl");
+    expect(JSON.stringify(attest)).not.toContain("nordic-origin-certificate.pdf");
+    expect(JSON.stringify(attest)).not.toContain("ev-nordic-private");
+    expect(JSON.stringify(attest)).not.toContain("storage");
     const ref = opaqueEvidenceRef("acme", "ev-92831");
     const allowed = await getEvidenceAccess(store, acme, ref);
     expect(allowed.type).toBe("EVIDENCE_RECORD");
-    expect(allowed.signedUrl).toBeTruthy();
-    expect(JSON.stringify(allowed)).not.toContain("storageKey");
+    if (allowed.type === "EVIDENCE_RECORD") {
+      expect(allowed.signedUrl).toBeTruthy();
+      expect(JSON.stringify(allowed)).not.toContain("storageKey");
+    }
   });
 
   it("decodes opaque evidence refs in O(1) without scanning tenant evidence ids", () => {

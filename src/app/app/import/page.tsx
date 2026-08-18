@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { EvidenceLine, Metric, SourceButton, SourceLabel } from "@/components/source/ui";
-import { api } from "@/client/source/api";
+import { api, uploadSourceFile } from "@/client/source/api";
 
 const STAGE_COPY: Record<string, string> = {
   UPLOADED: "We're getting to know your products.",
@@ -17,6 +17,7 @@ const STAGE_COPY: Record<string, string> = {
   RESOLUTION_PLANNING: "Preparing resolution cases",
   COMPLETE: "Your catalogue is ready.",
   PARTIAL: "Your catalogue is connected, with a few records to review.",
+  FAILED: "We kept your file. Review the errors and retry processing.",
 };
 
 interface ImportJob {
@@ -28,6 +29,8 @@ interface ImportJob {
   warningCount: number;
   errorCount: number;
   reviewCount: number;
+  startedAt?: string;
+  sourceFiles?: Record<string, { filename: string; sizeBytes: number }>;
   summary?: {
     products: number;
     suppliers: number;
@@ -40,31 +43,58 @@ interface ImportJob {
 
 export default function ImportWizardPage() {
   const router = useRouter();
-  const [products, setProducts] = useState(SAMPLE_PRODUCTS);
-  const [suppliers, setSuppliers] = useState(SAMPLE_SUPPLIERS);
-  const [bom, setBom] = useState(SAMPLE_BOM);
+  const [productFile, setProductFile] = useState<File | null>(null);
+  const [supplierFile, setSupplierFile] = useState<File | null>(null);
+  const [bomFile, setBomFile] = useState<File | null>(null);
   const [job, setJob] = useState<ImportJob | null>(null);
   const [events, setEvents] = useState<{ type: string; payload: Record<string, string | number | boolean | null> }[]>([]);
+  const [history, setHistory] = useState<ImportJob[]>([]);
   const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void api<{ jobs: ImportJob[] }>("/api/imports")
+      .then((data) => setHistory(data.jobs))
+      .catch(() => undefined);
+  }, [job]);
 
   async function start() {
+    if (!productFile || busy) return;
     setBusy(true);
+    setError(null);
     try {
+      setStatus("Uploading catalogue…");
+      const products = await uploadSourceFile({ purpose: "IMPORT_SOURCE", file: productFile });
+      const suppliers = supplierFile
+        ? await uploadSourceFile({ purpose: "IMPORT_SOURCE", file: supplierFile })
+        : undefined;
+      const bom = bomFile ? await uploadSourceFile({ purpose: "IMPORT_SOURCE", file: bomFile }) : undefined;
+      setStatus("Processing…");
       const created = await api<ImportJob>("/api/imports", {
         method: "POST",
-        body: JSON.stringify({ products, suppliers, bom }),
+        body: JSON.stringify({
+          storageObjectIds: {
+            products: products.id,
+            suppliers: suppliers?.id,
+            bom: bom?.id,
+          },
+        }),
       });
       setJob(created);
       const progress = await api<{ job: ImportJob; events: typeof events; percent: number }>(`/api/imports/${created.id}`);
       setJob(progress.job);
       setEvents(progress.events);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "We couldn't store this file. Nothing has been added yet.");
     } finally {
       setBusy(false);
+      setStatus(null);
     }
   }
 
   const percent = job?.totalCount ? Math.round((job.processedCount / job.totalCount) * 100) : 0;
-  const done = job && (job.state === "COMPLETE" || job.state === "PARTIAL");
+  const done = job && (job.state === "COMPLETE" || job.state === "PARTIAL" || job.state === "FAILED");
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -77,26 +107,19 @@ export default function ImportWizardPage() {
           Import {job.state === "COMPLETE" || job.state === "PARTIAL" ? "finished" : "running"} · {percent}%
         </p>
       ) : (
-        <p className="mt-2 text-[13px] text-[#101A15]/60">CSV first. You only correct uncertain column mappings.</p>
+        <p className="mt-2 text-[13px] text-[#101A15]/60">Choose CSV files. SOURCE stores the original privately, then processes it.</p>
       )}
 
       {!job ? (
         <>
-          <div className="mt-8 grid gap-4 font-[family-name:var(--font-plex)] text-[12px]">
-            <label>
-              Products.csv
-              <textarea className="mt-1 h-28 w-full border border-[#101A15]/15 bg-[#FBFCFA] p-2" value={products} onChange={(e) => setProducts(e.target.value)} />
-            </label>
-            <label>
-              Suppliers.csv
-              <textarea className="mt-1 h-24 w-full border border-[#101A15]/15 bg-[#FBFCFA] p-2" value={suppliers} onChange={(e) => setSuppliers(e.target.value)} />
-            </label>
-            <label>
-              BOM.csv
-              <textarea className="mt-1 h-24 w-full border border-[#101A15]/15 bg-[#FBFCFA] p-2" value={bom} onChange={(e) => setBom(e.target.value)} />
-            </label>
+          <div className="mt-8 grid gap-4 text-[13px]">
+            <FileField label="Products.csv" accept=".csv,text/csv" onFile={setProductFile} file={productFile} />
+            <FileField label="Suppliers.csv (optional)" accept=".csv,text/csv" onFile={setSupplierFile} file={supplierFile} />
+            <FileField label="BOM.csv (optional)" accept=".csv,text/csv" onFile={setBomFile} file={bomFile} />
           </div>
-          <SourceButton className="mt-6" onClick={() => void start()} disabled={busy}>
+          {status ? <p className="mt-4 text-[13px] text-[#101A15]/65">{status}</p> : null}
+          {error ? <p className="mt-4 text-[13px] text-[#B26B2C]">{error}</p> : null}
+          <SourceButton className="mt-6" onClick={() => void start()} disabled={busy || !productFile}>
             Start import
           </SourceButton>
         </>
@@ -139,7 +162,7 @@ export default function ImportWizardPage() {
           </p>
           {job.errorCount ? (
             <p className="mt-3 text-[13px] text-[#B26B2C]">
-              {job.errorCount} could not be imported. {job.reviewCount} need review. Continue without them, or correct the rows.
+              {job.errorCount} could not be imported. {job.reviewCount} need review. The original file is kept.
             </p>
           ) : null}
           <div className="mt-6 flex flex-wrap gap-2">
@@ -156,23 +179,44 @@ export default function ImportWizardPage() {
           </div>
         </div>
       ) : null}
+
+      {history.length ? (
+        <div className="mt-12">
+          <SourceLabel>Import history</SourceLabel>
+          <ul className="mt-3 space-y-2 text-[13px]">
+            {history.map((item) => (
+              <li key={item.id} className="border border-[#101A15]/10 px-3 py-2">
+                <div>{item.sourceFiles?.products?.filename ?? item.id}</div>
+                <div className="text-[12px] text-[#101A15]/55">
+                  {item.startedAt ? new Date(item.startedAt).toLocaleString() : ""} · {item.state.toLowerCase()}
+                  {item.sourceFiles?.products?.sizeBytes ? ` · ${item.sourceFiles.products.sizeBytes} bytes` : ""}
+                  {item.summary ? ` · ${item.summary.products} products` : ""}
+                  {item.errorCount ? ` · ${item.errorCount} errors` : ""}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-const SAMPLE_PRODUCTS = `external_product_id,name,sku,gtin,manufacturer,supplier_id,manufacturer_part_number
-urban-chair-04,Urban Chair 04,URBAN-CHAIR-04,8712345678901,Acme,supplier-a,ALF881
-lounge-11,Lounge 11,LOUNGE-11,8712345678902,Acme,supplier-b,LG11
-desk-02,Desk 02,DESK-02,8712345678903,Acme,furnco,DK02
-`;
-
-const SAMPLE_SUPPLIERS = `external_supplier_id,name,legal_name,vat,country,domain
-supplier-a,Supplier A,Supplier A GmbH,DE813334455,Germany,suppliera.example
-supplier-b,Supplier B,Supplier B S.r.l.,IT01234567890,Italy,supplierb.example
-furnco,FurnCo,FurnCo BV,,Netherlands,furnco.example
-`;
-
-const SAMPLE_BOM = `product_id,component_id,component_name,quantity,unit,supplier_id,manufacturer_part_number
-urban-chair-04,AL-FRAME-881,Aluminium Frame,1,ea,supplier-a,ALF881
-urban-chair-04,TEXTILE-04,Textile,1,ea,supplier-b,
-`;
+function FileField(props: { label: string; accept: string; file: File | null; onFile: (file: File | null) => void }) {
+  return (
+    <label>
+      {props.label}
+      <input
+        className="mt-1 block w-full text-[12px]"
+        type="file"
+        accept={props.accept}
+        onChange={(event) => props.onFile(event.target.files?.[0] ?? null)}
+      />
+      {props.file ? (
+        <span className="mt-1 block font-[family-name:var(--font-plex)] text-[12px] text-[#101A15]/60">
+          {props.file.name} · {props.file.size} bytes
+        </span>
+      ) : null}
+    </label>
+  );
+}

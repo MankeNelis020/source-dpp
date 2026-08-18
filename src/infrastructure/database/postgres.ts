@@ -22,6 +22,7 @@ import type {
   PersistencePort,
   SessionRecord,
   ShareableTrustCandidate,
+  StorageObjectRecord,
 } from "./ports";
 
 type Queryable = Pool | PoolClient;
@@ -476,13 +477,14 @@ export class PostgresPersistence implements PersistencePort {
       await client.query(
         `INSERT INTO import_jobs (
            id, organisation_id, state, current_stage, processed_count, total_count, warning_count, error_count, review_count,
-           started_at, completed_at, mapping, summary, raw_records
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb)
+           started_at, completed_at, mapping, summary, raw_records, source_storage_object_ids, source_files
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16::jsonb)
          ON CONFLICT (id) DO UPDATE SET
            state = EXCLUDED.state, current_stage = EXCLUDED.current_stage, processed_count = EXCLUDED.processed_count,
            total_count = EXCLUDED.total_count, warning_count = EXCLUDED.warning_count, error_count = EXCLUDED.error_count,
            review_count = EXCLUDED.review_count, completed_at = EXCLUDED.completed_at, summary = EXCLUDED.summary,
-           mapping = EXCLUDED.mapping, raw_records = EXCLUDED.raw_records`,
+           mapping = EXCLUDED.mapping, raw_records = EXCLUDED.raw_records,
+           source_storage_object_ids = EXCLUDED.source_storage_object_ids, source_files = EXCLUDED.source_files`,
         [
           job.id,
           job.organisationId,
@@ -498,6 +500,8 @@ export class PostgresPersistence implements PersistencePort {
           JSON.stringify(job.mapping ?? {}),
           job.summary ? JSON.stringify(job.summary) : null,
           job.rawRecords ? JSON.stringify(job.rawRecords) : null,
+          job.sourceStorageObjectIds ? JSON.stringify(job.sourceStorageObjectIds) : null,
+          job.sourceFiles ? JSON.stringify(job.sourceFiles) : null,
         ]
       );
     });
@@ -511,10 +515,15 @@ export class PostgresPersistence implements PersistencePort {
   async listImportJobs(organisationId: string) {
     return this.withTenant(organisationId, async (client) => {
       const { rows } = await client.query(
-        `SELECT id, organisation_id AS "organisationId", state FROM import_jobs WHERE organisation_id = $1`,
+        `SELECT id, organisation_id AS "organisationId", state, current_stage AS "currentStage",
+                processed_count AS "processedCount", total_count AS "totalCount",
+                warning_count AS "warningCount", error_count AS "errorCount", review_count AS "reviewCount",
+                started_at AS "startedAt", completed_at AS "completedAt", mapping, summary,
+                source_storage_object_ids AS "sourceStorageObjectIds", source_files AS "sourceFiles"
+         FROM import_jobs WHERE organisation_id = $1 ORDER BY started_at DESC NULLS LAST`,
         [organisationId]
       );
-      return rows as ImportJob[];
+      return rows.map((row) => mapImportJob(row as Record<string, unknown>));
     });
   }
 
@@ -578,8 +587,9 @@ export class PostgresPersistence implements PersistencePort {
       await client.query(
         `INSERT INTO evidence_objects (
            evidence_id, owner_actor_id, organisation_id, storage_key, sha256, mime_type, size_bytes,
-           original_filename, issuer, uploaded_by, created_at, valid_from, valid_until, visibility
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+           original_filename, issuer, uploaded_by, created_at, valid_from, valid_until, visibility,
+           storage_object_id, availability, supersedes_evidence_id, uploaded_via_portal_grant_id
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
         [
           object.evidenceId,
           object.ownerActorId,
@@ -595,6 +605,10 @@ export class PostgresPersistence implements PersistencePort {
           object.validFrom ?? null,
           object.validUntil ?? null,
           object.visibility,
+          object.storageObjectId ?? null,
+          object.availability ?? null,
+          object.supersedesEvidenceId ?? null,
+          object.uploadedViaPortalGrantId ?? null,
         ]
       );
     };
@@ -610,11 +624,77 @@ export class PostgresPersistence implements PersistencePort {
       `SELECT evidence_id AS "evidenceId", owner_actor_id AS "ownerActorId", organisation_id AS "organisationId",
               storage_key AS "storageKey", sha256, mime_type AS "mimeType", size_bytes AS size,
               original_filename AS "originalFilename", issuer, uploaded_by AS "uploadedBy", created_at AS "createdAt",
-              valid_from AS "validFrom", valid_until AS "validUntil", visibility
+              valid_from AS "validFrom", valid_until AS "validUntil", visibility,
+              storage_object_id AS "storageObjectId", availability,
+              supersedes_evidence_id AS "supersedesEvidenceId",
+              uploaded_via_portal_grant_id AS "uploadedViaPortalGrantId"
        FROM evidence_objects WHERE evidence_id = $1`,
       [evidenceId]
     );
     return rows[0] as EvidenceObject | undefined;
+  }
+
+  async saveStorageObject(object: StorageObjectRecord) {
+    await this.withTenant(object.organisationId, async (client) => {
+      await client.query(
+        `INSERT INTO storage_objects (
+           id, organisation_id, bucket, object_key, purpose, availability, original_filename, mime_type, size_bytes,
+           sha256, created_by_principal_id, created_via_portal_grant_id, case_id, requirement_id, evidence_id,
+           scan_status, expires_at, deleted_at, created_at, finalized_at, supersedes_storage_object_id
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+         ON CONFLICT (id) DO UPDATE SET
+           purpose = EXCLUDED.purpose, availability = EXCLUDED.availability, mime_type = EXCLUDED.mime_type,
+           size_bytes = EXCLUDED.size_bytes, sha256 = EXCLUDED.sha256, scan_status = EXCLUDED.scan_status,
+           expires_at = EXCLUDED.expires_at, deleted_at = EXCLUDED.deleted_at, finalized_at = EXCLUDED.finalized_at,
+           evidence_id = EXCLUDED.evidence_id, case_id = EXCLUDED.case_id, requirement_id = EXCLUDED.requirement_id`,
+        [
+          object.id,
+          object.organisationId,
+          object.bucket,
+          object.objectKey,
+          object.purpose,
+          object.availability,
+          object.originalFilename,
+          object.mimeType ?? null,
+          object.sizeBytes ?? null,
+          object.sha256 ?? null,
+          object.createdByPrincipalId ?? null,
+          object.createdViaPortalGrantId ?? null,
+          object.caseId ?? null,
+          object.requirementId ?? null,
+          object.evidenceId ?? null,
+          object.scanStatus,
+          object.expiresAt ?? null,
+          object.deletedAt ?? null,
+          object.createdAt,
+          object.finalizedAt ?? null,
+          object.supersedesStorageObjectId ?? null,
+        ]
+      );
+    });
+  }
+
+  async getStorageObject(id: string) {
+    const { rows } = await this.q("SELECT * FROM find_storage_object_by_id($1)", [id]);
+    const row = rows[0];
+    if (!row) return undefined;
+    const mapped = mapStorageObject(row as Record<string, unknown>);
+    if (mapped.deletedAt) return undefined;
+    return this.withTenant(mapped.organisationId, async () => mapped);
+  }
+
+  async listStorageObjects(organisationId: string) {
+    return this.withTenant(organisationId, async (client) => {
+      const { rows } = await client.query(`SELECT * FROM storage_objects WHERE organisation_id = $1 AND deleted_at IS NULL`, [
+        organisationId,
+      ]);
+      return rows.map((row) => mapStorageObject(row as Record<string, unknown>));
+    });
+  }
+
+  async listExpiredTemporaryUploads(now = new Date()) {
+    const { rows } = await this.q("SELECT * FROM list_expired_temporary_uploads($1)", [now.toISOString()]);
+    return rows.map((row) => mapStorageObject(row as Record<string, unknown>));
   }
 
   async insertOutbox(record: OutboxRecord) {
@@ -772,6 +852,34 @@ function mapImportJob(row: Record<string, unknown>): ImportJob {
     mapping: (row.mapping as ImportJob["mapping"]) ?? {},
     summary: (row.summary as ImportJob["summary"]) ?? undefined,
     rawRecords: (row.raw_records ?? row.rawRecords) as ImportJob["rawRecords"],
+    sourceStorageObjectIds: (row.source_storage_object_ids ?? row.sourceStorageObjectIds) as ImportJob["sourceStorageObjectIds"],
+    sourceFiles: (row.source_files ?? row.sourceFiles) as ImportJob["sourceFiles"],
+  };
+}
+
+function mapStorageObject(row: Record<string, unknown>): StorageObjectRecord {
+  return {
+    id: String(row.id),
+    organisationId: String(row.organisation_id ?? row.organisationId),
+    bucket: String(row.bucket),
+    objectKey: String(row.object_key ?? row.objectKey),
+    purpose: String(row.purpose) as StorageObjectRecord["purpose"],
+    availability: String(row.availability) as StorageObjectRecord["availability"],
+    originalFilename: String(row.original_filename ?? row.originalFilename),
+    mimeType: (row.mime_type ?? row.mimeType) as string | undefined,
+    sizeBytes: row.size_bytes != null || row.sizeBytes != null ? Number(row.size_bytes ?? row.sizeBytes) : undefined,
+    sha256: (row.sha256 as string | undefined) ?? undefined,
+    createdByPrincipalId: (row.created_by_principal_id ?? row.createdByPrincipalId) as string | undefined,
+    createdViaPortalGrantId: (row.created_via_portal_grant_id ?? row.createdViaPortalGrantId) as string | undefined,
+    caseId: (row.case_id ?? row.caseId) as string | undefined,
+    requirementId: (row.requirement_id ?? row.requirementId) as string | undefined,
+    evidenceId: (row.evidence_id ?? row.evidenceId) as string | undefined,
+    scanStatus: String(row.scan_status ?? row.scanStatus ?? "PENDING") as StorageObjectRecord["scanStatus"],
+    expiresAt: (row.expires_at ?? row.expiresAt) as string | undefined,
+    deletedAt: (row.deleted_at ?? row.deletedAt) as string | undefined,
+    createdAt: String(row.created_at ?? row.createdAt),
+    finalizedAt: (row.finalized_at ?? row.finalizedAt) as string | undefined,
+    supersedesStorageObjectId: (row.supersedes_storage_object_id ?? row.supersedesStorageObjectId) as string | undefined,
   };
 }
 

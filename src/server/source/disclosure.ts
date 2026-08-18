@@ -218,6 +218,8 @@ export type EvidenceProjection =
       status: string;
       expired: boolean;
       validUntil?: string;
+      signedUrl?: string;
+      signedExpiresAt?: string;
     }
   | {
       type: "EVIDENCE_ATTESTATION";
@@ -287,6 +289,7 @@ export function confidentialSecrets(state: EngineState): string[] {
     pushSecret(secrets, evidence.id);
     pushSecret(secrets, evidence.filename);
     pushSecret(secrets, evidence.ownerActorId);
+    if (evidence.storageObjectId) pushSecret(secrets, evidence.storageObjectId);
     if (!decision.canRevealIssuer) pushSecret(secrets, evidence.issuer);
     if (!decision.canRevealHash) pushSecret(secrets, evidence.sha256);
   }

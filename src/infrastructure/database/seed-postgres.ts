@@ -41,7 +41,7 @@ export async function resetAndSeedPostgres(migrator: Pool) {
     TRUNCATE
       identity_commands, organisation_invitations,
       outbox_events, rate_limit_windows, shareable_trust_objects, audit_events, processed_commands,
-      import_job_events, import_jobs, evidence_objects, sessions, supplier_portal_grants,
+      import_job_events, import_jobs, evidence_objects, storage_objects, sessions, supplier_portal_grants,
       engine_states, memberships, users, organisations
     RESTART IDENTITY CASCADE
   `);

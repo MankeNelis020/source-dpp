@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { SourceWordmark } from "@/components/source/wordmark";
 import { EvidenceLine, SourceButton, SourceLabel, StatusPill } from "@/components/source/ui";
 import { SUPPLIER_ACTIONS } from "@/domain/source/copy";
-import { usePortalCommand, useSourceQuery } from "@/client/source/api";
+import { uploadSourceFile, usePortalCommand, useSourceQuery } from "@/client/source/api";
 import type { DeclineReason, UnknownChoice, UpstreamContactMode } from "@/domain/source";
 
 type ActionId = (typeof SUPPLIER_ACTIONS)[number]["id"];
@@ -35,6 +35,8 @@ export default function SupplierPortalPage() {
   const [colleague, setColleague] = useState("compliance@suppliera.example");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [uploadState, setUploadState] = useState<string | null>(null);
 
   const current = useMemo(
     () => questions.find((c) => c.id === caseId) ?? questions[0],
@@ -52,18 +54,38 @@ export default function SupplierPortalPage() {
     setBusy(true);
     try {
       if (action === "provide" || action === "upload" || action === "existing") {
+        let storageObjectId: string | undefined;
+        if (action !== "provide") {
+          if (!evidenceFile) {
+            setBusy(false);
+            setMessage("Choose a supporting file first.");
+            return;
+          }
+          setUploadState("Uploading…");
+          const stored = await uploadSourceFile({
+            purpose: "EVIDENCE",
+            file: evidenceFile,
+            caseId: current.id,
+            portalToken: token,
+          });
+          storageObjectId = stored.id;
+          setUploadState("File received.");
+        }
         await runCommand({
           type: "SUBMIT_RESPONSE",
           caseId: current.id,
           value,
           unit: "%",
-          evidence: action === "provide" ? undefined : { filename: "supplier-upload.pdf" },
+          evidence:
+            action === "provide"
+              ? undefined
+              : { filename: evidenceFile?.name ?? "upload", storageObjectId },
           permission: share,
         });
         finish(
           action === "provide"
             ? "Answer saved as declared. If this dataset needs evidence, the case stays open."
-            : "Evidence received. SOURCE will validate scope before the claim can become ready."
+            : "File received. SOURCE will check whether it satisfies the requested information."
         );
         return;
       }
@@ -204,6 +226,21 @@ export default function SupplierPortalPage() {
                   <option value="DENIED">Do not allow reuse</option>
                 </select>
               </label>
+              {action === "upload" || action === "existing" ? (
+                <label className="block text-[12px]">
+                  Upload supporting evidence
+                  <input
+                    className="mt-1 block w-full"
+                    type="file"
+                    accept=".pdf,.csv,.png,.jpg,.jpeg,application/pdf,text/csv,image/png,image/jpeg"
+                    onChange={(event) => setEvidenceFile(event.target.files?.[0] ?? null)}
+                  />
+                  <span className="mt-1 block text-[12px] text-[#101A15]/55">
+                    PDF, CSV, PNG or JPEG. SOURCE stores the file privately. This does not mean your product is compliant.
+                  </span>
+                  {uploadState ? <span className="mt-1 block">{uploadState}</span> : null}
+                </label>
+              ) : null}
             </div>
           ) : null}
           {action === "unknown" ? (

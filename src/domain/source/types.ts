@@ -409,6 +409,8 @@ export interface ClaimRecord {
   downstreamTargets?: string[];
 }
 
+export type EvidenceAvailability = "UPLOADING" | "PROCESSING" | "AVAILABLE" | "REJECTED" | "QUARANTINED";
+
 export interface EvidenceRecord {
   id: string;
   filename: string;
@@ -422,6 +424,15 @@ export interface EvidenceRecord {
   linkedClaimIds: string[];
   extractedValue?: string;
   extractionConfidence?: number;
+  storageObjectId?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  availability?: EvidenceAvailability;
+  supersedesEvidenceId?: string;
+  supersededByEvidenceId?: string;
+  uploadedViaPortalGrantId?: string;
+  uploadedByPrincipalId?: string;
+  createdAt?: string;
 }
 
 export interface EvidenceScope {
@@ -699,7 +710,18 @@ export type Command =
       caseId: string;
       value: string;
       unit?: string;
-      evidence?: { filename: string; extractedValue?: string; confidence?: number; scope?: EvidenceScope };
+      evidence?: {
+        filename: string;
+        extractedValue?: string;
+        confidence?: number;
+        scope?: EvidenceScope;
+        storageObjectId?: string;
+        sha256?: string;
+        mimeType?: string;
+        sizeBytes?: number;
+        availability?: EvidenceAvailability;
+        supersedesEvidenceId?: string;
+      };
       permission: PermissionState;
       visibility?: PermissionGrant["visibility"];
     }

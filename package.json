@@ -7,10 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run --exclude src/server/source/p01-postgres.test.ts --exclude src/server/source/b1-runtime-persistence.test.ts",
-    "test:postgres": "vitest run --fileParallelism=false src/server/source/p01-postgres.test.ts src/server/source/b1-runtime-persistence.test.ts",
+    "test": "vitest run --exclude src/server/source/p01-postgres.test.ts --exclude src/server/source/b1-runtime-persistence.test.ts --exclude src/server/source/b2-storage-postgres.test.ts",
+    "test:postgres": "vitest run --fileParallelism=false src/server/source/p01-postgres.test.ts src/server/source/b1-runtime-persistence.test.ts src/server/source/b2-storage-postgres.test.ts",
     "db:migrate": "tsx src/infrastructure/database/migrate-cli.ts",
-    "db:seed": "tsx src/infrastructure/database/seed-cli.ts"
+    "db:seed": "tsx src/infrastructure/database/seed-cli.ts",
+    "storage:bootstrap": "tsx src/infrastructure/storage/bootstrap.ts",
+    "test:storage": "vitest run src/server/source/storage.test.ts src/infrastructure/storage/memory.test.ts src/infrastructure/environment/source-environment.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",

@@ -4,7 +4,7 @@ import { createSeedState, emptyState, hydrateEngineState } from "@/domain/source
 import { hashToken, hashesEqual } from "@/infrastructure/crypto/tokens";
 import type { OutboxRecord, OutboxStatus } from "@/infrastructure/outbox/types";
 import { PORTAL_ALLOWED_DEFAULT, type ImportJob, type ImportJobEvent, type ImportMappingProfile, type ImmutableAuditEvent, type IdentityCommandRecord, type Membership, type Organisation, type OrganisationInvitation, type ProcessedCommand, type SupplierPortalGrant, type UserRecord } from "@/server/source/types";
-import type { EvidenceObject, PersistencePort, SessionRecord, ShareableTrustCandidate } from "./ports";
+import type { EvidenceObject, PersistencePort, SessionRecord, ShareableTrustCandidate, StorageObjectRecord } from "./ports";
 
 const DEMO_EXPIRY = "2027-08-17T00:00:00.000Z";
 
@@ -116,6 +116,7 @@ export class MemoryPersistence implements PersistencePort {
   importEvents = new Map<string, ImportJobEvent[]>();
   mappingProfiles = new Map<string, ImportMappingProfile>();
   evidence = new Map<string, EvidenceObject>();
+  storageObjects = new Map<string, StorageObjectRecord>();
   outbox: OutboxRecord[] = [];
   sessions = new Map<string, SessionRecord>();
   invitations = new Map<string, OrganisationInvitation>();
@@ -221,6 +222,7 @@ export class MemoryPersistence implements PersistencePort {
     this.importEvents.clear();
     this.mappingProfiles.clear();
     this.evidence.clear();
+    this.storageObjects.clear();
     this.outbox = [];
     this.sessions.clear();
     this.invitations.clear();
@@ -364,6 +366,25 @@ export class MemoryPersistence implements PersistencePort {
   }
   getEvidence(evidenceId: string) {
     return this.evidence.get(evidenceId);
+  }
+  saveStorageObject(object: StorageObjectRecord) {
+    this.storageObjects.set(object.id, { ...object });
+  }
+  getStorageObject(id: string) {
+    const row = this.storageObjects.get(id);
+    return row && !row.deletedAt ? { ...row } : undefined;
+  }
+  listStorageObjects(organisationId: string) {
+    return [...this.storageObjects.values()].filter((row) => row.organisationId === organisationId && !row.deletedAt);
+  }
+  listExpiredTemporaryUploads(now = new Date()) {
+    return [...this.storageObjects.values()].filter(
+      (row) =>
+        row.purpose === "TEMPORARY_UPLOAD" &&
+        !row.deletedAt &&
+        row.expiresAt &&
+        new Date(row.expiresAt) < now
+    );
   }
   nextId(prefix: string) {
     this.seq += 1;

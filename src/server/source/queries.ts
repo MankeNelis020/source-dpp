@@ -10,8 +10,9 @@ import { evaluateEvidenceDisclosure, hasEvidenceByteAccess, opaqueEvidenceRef, r
 import { projectDomainEvent, projectStructuredAudit } from "./audit";
 import type { Principal, PortalPrincipal } from "./types";
 import { SourceError } from "./types";
-import type { EvidenceStorage } from "@/infrastructure/storage/evidence";
-import { getMemoryEvidenceStorage } from "@/infrastructure/storage/evidence";
+import type { ObjectStorage } from "@/infrastructure/storage/port";
+import { ObjectStorageError } from "@/infrastructure/storage/port";
+import { getRuntimeObjectStorage, getSourceEnvironment } from "@/infrastructure/runtime";
 import { METRICS, metricInc, logOperational } from "@/infrastructure/observability/metrics";
 
 const DETECTED: ResolutionCaseState[] = ["DETECTED", "RESOLVING_IDENTITY", "SEARCHING_EXISTING_DATA"];
@@ -361,11 +362,27 @@ export async function searchTenant(store: PersistencePort, principal: Principal,
   return { actors, subjects, evidence };
 }
 
+export async function getEvidenceLibrary(store: PersistencePort, principal: Principal) {
+  const state = await loadTenant(store, principal);
+  return state.evidence
+    .map((evidence) => {
+      const projection = projectEvidenceForState(state, evidence, principal.capabilities);
+      if (!projection) return undefined;
+      if (projection.type !== "EVIDENCE_RECORD") return projection;
+      return {
+        ...projection,
+        availability: evidence.availability ?? "AVAILABLE",
+        createdAt: evidence.createdAt,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+}
+
 export async function getEvidenceAccess(
   store: PersistencePort,
   principal: Principal,
   reference: string,
-  storage: EvidenceStorage = getMemoryEvidenceStorage()
+  storage: ObjectStorage = getRuntimeObjectStorage()
 ) {
   const state = await loadTenant(store, principal);
   const byOpaque = resolveEvidenceIdFromOpaqueRef(principal.organisationId, reference);
@@ -380,33 +397,89 @@ export async function getEvidenceAccess(
     capabilities: principal.capabilities,
     organisationId: principal.organisationId,
   });
-  if (decision.level === "NONE" || decision.level === "ATTESTATION_ONLY" || decision.level === "EXISTENCE_ONLY") {
+  if (decision.level === "NONE") {
     metricInc(METRICS.evidenceAccessDenied);
     logOperational("evidence.access_denied", { organisationId: principal.organisationId });
     throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
   }
 
   const projection = projectEvidenceForState(state, evidence, principal.capabilities);
+  if (!projection) {
+    metricInc(METRICS.evidenceAccessDenied);
+    throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
+  }
+
+  if (decision.level === "ATTESTATION_ONLY" || decision.level === "EXISTENCE_ONLY" || !decision.canIssueSignedUrl) {
+    await store.appendAudit({
+      id: await Promise.resolve(store.nextId("aud")),
+      organisationId: principal.organisationId,
+      principalId: principal.userId,
+      action: "EVIDENCE_VIEWED_PRIVATE",
+      resourceType: "Evidence",
+      result: "success",
+      publicContext: { disclosure: decision.level },
+      createdAt: new Date().toISOString(),
+      policyVersion: "p01-v1",
+    });
+    return projection;
+  }
+
   let signedUrl: string | undefined;
+  let signedExpiresAt: string | undefined;
   if (hasEvidenceByteAccess(principal, decision)) {
-    const object = await store.getEvidence(evidence.id);
-    const key = object?.storageKey ?? `evidence/${principal.organisationId}/${evidence.id}`;
-    signedUrl = await storage.createSignedRead({ key, ttlSeconds: 60 });
+    const object = evidence.storageObjectId ? await store.getStorageObject(evidence.storageObjectId) : undefined;
+    if (object && object.organisationId !== principal.organisationId) {
+      throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
+    }
+    const persisted = await store.getEvidence(evidence.id);
+    const bucket = object?.bucket;
+    const key = object?.objectKey ?? persisted?.storageKey;
+    if (bucket && key) {
+      try {
+        const ttl = signedReadTtl();
+        const signed = await storage.createSignedRead({ bucket, key, ttlSeconds: ttl });
+        signedUrl = signed.url;
+        signedExpiresAt = signed.expiresAt;
+        metricInc(METRICS.storageSignedReads);
+      } catch (error) {
+        metricInc(METRICS.storageSignedReadFailures);
+        if (error instanceof ObjectStorageError) {
+          throw new SourceError("STORAGE_UNAVAILABLE", "Evidence is temporarily unavailable.", 503);
+        }
+        throw new SourceError("STORAGE_UNAVAILABLE", "Evidence is temporarily unavailable.", 503);
+      }
+    } else {
+      try {
+        const ttl = signedReadTtl();
+        const signed = await storage.createSignedRead({
+          bucket: "source-evidence",
+          key: persisted?.storageKey ?? `evidence/${principal.organisationId}/${evidence.id}`,
+          ttlSeconds: ttl,
+        });
+        signedUrl = signed.url;
+        signedExpiresAt = signed.expiresAt;
+      } catch {
+        signedUrl = undefined;
+      }
+    }
   }
 
   await store.appendAudit({
     id: await Promise.resolve(store.nextId("aud")),
     organisationId: principal.organisationId,
     principalId: principal.userId,
-    action: signedUrl ? "EVIDENCE_SIGNED_URL" : "EVIDENCE_VIEWED_PRIVATE",
+    action: signedUrl ? "EVIDENCE_DOWNLOAD_GRANTED" : "EVIDENCE_VIEWED_PRIVATE",
     resourceType: "Evidence",
     result: "success",
-    publicContext: { opaqueRef: opaqueEvidenceRef(principal.organisationId, evidence.id) },
+    publicContext: {
+      opaqueRef: opaqueEvidenceRef(principal.organisationId, evidence.id),
+      disclosure: decision.level,
+    },
     createdAt: new Date().toISOString(),
     policyVersion: "p01-v1",
   });
 
-  if (!projection) {
+  if (!projection || projection.type !== "EVIDENCE_RECORD") {
     metricInc(METRICS.evidenceAccessDenied);
     throw new SourceError("RESOURCE_UNAVAILABLE", "Resource unavailable.", 404);
   }
@@ -414,7 +487,16 @@ export async function getEvidenceAccess(
   return {
     ...projection,
     signedUrl,
+    signedExpiresAt,
   };
+}
+
+function signedReadTtl(): number {
+  try {
+    return getSourceEnvironment().signedReadTtlSeconds;
+  } catch {
+    return 300;
+  }
 }
 
 export async function getTenantAudit(store: PersistencePort, principal: Principal) {

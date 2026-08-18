@@ -4,8 +4,10 @@ import { createRuntimePersistence, type RuntimePersistence } from "@/infrastruct
 import type { PersistencePort } from "@/infrastructure/database/ports";
 import { getMemoryRateLimiter } from "@/infrastructure/rate-limit/memory";
 import type { RateLimiter } from "@/infrastructure/rate-limit/port";
-import { getMemoryEvidenceStorage } from "@/infrastructure/storage/evidence";
-import type { EvidenceStorage } from "@/infrastructure/storage/evidence";
+import { getMemoryEvidenceStorage, type EvidenceStorage } from "@/infrastructure/storage/evidence";
+import { createRuntimeObjectStorage } from "@/infrastructure/storage/factory";
+import { getMemoryObjectStorage, resetMemoryObjectStorage } from "@/infrastructure/storage/memory";
+import type { ObjectStorage } from "@/infrastructure/storage/port";
 import {
   isNextBuildPhase,
   loadSourceEnvironment,
@@ -16,6 +18,8 @@ import {
 let runtime: RuntimePersistence | undefined;
 let lastHealth: PersistenceHealth | undefined;
 let bootError: Error | undefined;
+let objectStorage: ObjectStorage | undefined;
+let objectStorageOverride: ObjectStorage | undefined;
 
 export function isPostgresConfigured(): boolean {
   if (isNextBuildPhase()) return false;
@@ -49,6 +53,26 @@ export function setRuntimeRateLimiter(limiter: RateLimiter) {
   runtime = { ...current, rateLimiter: limiter };
 }
 
+export function getRuntimeObjectStorage(): ObjectStorage {
+  if (objectStorageOverride) return objectStorageOverride;
+  if (objectStorage) return objectStorage;
+  if (isNextBuildPhase()) {
+    objectStorage = getMemoryObjectStorage();
+    return objectStorage;
+  }
+  try {
+    objectStorage = createRuntimeObjectStorage(loadSourceEnvironment());
+    return objectStorage;
+  } catch (error) {
+    bootError = error instanceof Error ? error : new SourceEnvironmentError("SOURCE runtime failed to start.");
+    throw bootError;
+  }
+}
+
+export function setRuntimeObjectStorage(storage: ObjectStorage | undefined) {
+  objectStorageOverride = storage;
+}
+
 export function getRuntimeEvidenceStorage(): EvidenceStorage {
   return getMemoryEvidenceStorage();
 }
@@ -56,7 +80,7 @@ export function getRuntimeEvidenceStorage(): EvidenceStorage {
 export function getPersistenceHealth(): PersistenceHealth {
   if (lastHealth) return lastHealth;
   return getRuntime().kind === "postgres"
-    ? { database: "error", persistence: "postgres" }
+    ? { database: "error", persistence: "postgres", storage: "error" }
     : memoryHealth();
 }
 
@@ -64,6 +88,9 @@ export function resetRuntimeForTests() {
   runtime = undefined;
   lastHealth = undefined;
   bootError = undefined;
+  objectStorage = undefined;
+  objectStorageOverride = undefined;
+  resetMemoryObjectStorage();
 }
 
 /**
@@ -80,6 +107,10 @@ export function demoAuthEnabled(): boolean {
   return false;
 }
 
+export function durableEvidenceRequired(env: SourceEnvironment = loadSourceEnvironment()): boolean {
+  return env.objectStorage === "supabase";
+}
+
 /**
  * Resolve environment → validate project URL → validate secrets → create persistence → health-check.
  * Preview/production never fall back to memory.
@@ -91,19 +122,30 @@ export async function bootSourceRuntime(): Promise<RuntimePersistence> {
   if (bootError) throw bootError;
   if (!runtime) {
     try {
-      runtime = createRuntimePersistence(loadSourceEnvironment());
+      const env = loadSourceEnvironment();
+      runtime = createRuntimePersistence(env);
+      objectStorage = createRuntimeObjectStorage(env);
     } catch (error) {
       bootError =
         error instanceof Error ? error : new SourceEnvironmentError("SOURCE runtime failed to start.");
       throw bootError;
     }
   }
+  const storageStatus = await storageHealthStatus();
   if (runtime.kind === "postgres" && runtime.pool) {
-    lastHealth = await checkPostgresHealth(runtime.pool);
+    lastHealth = { ...(await checkPostgresHealth(runtime.pool)), storage: storageStatus };
   } else {
-    lastHealth = memoryHealth();
+    lastHealth = { ...memoryHealth(), storage: storageStatus };
   }
   return runtime;
+}
+
+async function storageHealthStatus(): Promise<"ok" | "error"> {
+  try {
+    return await getRuntimeObjectStorage().health();
+  } catch {
+    return "error";
+  }
 }
 
 function getRuntime(): RuntimePersistence {
@@ -115,7 +157,9 @@ function getRuntime(): RuntimePersistence {
     return runtime;
   }
   try {
-    runtime = createRuntimePersistence(loadSourceEnvironment());
+    const env = loadSourceEnvironment();
+    runtime = createRuntimePersistence(env);
+    objectStorage = createRuntimeObjectStorage(env);
   } catch (error) {
     bootError =
       error instanceof Error ? error : new SourceEnvironmentError("SOURCE runtime failed to start.");

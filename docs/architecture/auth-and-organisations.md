@@ -13,7 +13,7 @@ Supabase Auth
 
 Never authorize from `user_metadata.organisation_id`, `user_metadata.role`, or `user_metadata.is_admin`. Those fields may be user-editable. Membership lives in SOURCE-controlled Postgres.
 
-React may use the Auth SDK for session primitives only. Domain data still goes through SOURCE APIs. The runtime role remains `source_app` with `SET LOCAL source.organisation_id`. `SUPABASE_SERVICE_ROLE_KEY` is not used for domain I/O and is unused in this milestone.
+React may use the Auth SDK for session primitives only. Domain data still goes through SOURCE APIs. The runtime role remains `source_app` with `SET LOCAL source.organisation_id`. `SUPABASE_SERVICE_ROLE_KEY` is isolated in `SupabaseObjectStorage` and is never used to authorize user behavior.
 
 The Missing Information Engine is unchanged:
 

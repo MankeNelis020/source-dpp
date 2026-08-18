@@ -12,6 +12,7 @@ const SECRETS = {
   SOURCE_SESSION_SECRET: "test-session-secret",
   SOURCE_OPAQUE_REF_SECRET: "test-opaque-secret",
   NEXT_PUBLIC_SUPABASE_ANON_KEY: "test-anon-key-not-a-secret",
+  SUPABASE_SERVICE_ROLE_KEY: "test-service-role-not-a-secret",
 };
 
 const DEV_APP_URL = "postgres://source_app:not-a-real-secret@localhost:5432/postgres";
@@ -100,7 +101,12 @@ describe("SOURCE environment isolation", () => {
         runtime: "production",
         persistence: "postgres",
         identityProvider: "supabase",
+        objectStorage: "supabase",
         invitationTtlDays: 7,
+        importBucket: "source-imports",
+        evidenceBucket: "source-evidence",
+        signedReadTtlSeconds: 300,
+        tempUploadTtlHours: 24,
       })
     ).toThrow(SourceEnvironmentError);
     expect(() =>
@@ -108,7 +114,12 @@ describe("SOURCE environment isolation", () => {
         runtime: "production",
         persistence: "memory",
         identityProvider: "supabase",
+        objectStorage: "memory",
         invitationTtlDays: 7,
+        importBucket: "source-imports",
+        evidenceBucket: "source-evidence",
+        signedReadTtlSeconds: 300,
+        tempUploadTtlHours: 24,
       })
     ).toThrow(/memory persistence is not allowed/);
   });
@@ -192,5 +203,45 @@ describe("SOURCE environment isolation", () => {
         ),
       /must not use the runtime source_app role/
     );
+  });
+
+  it("fails closed when preview is missing SUPABASE_SERVICE_ROLE_KEY", () => {
+    expectConfigError(
+      () =>
+        loadSourceEnvironment({
+          SOURCE_ENV: "preview",
+          NEXT_PUBLIC_SUPABASE_URL: DEV_PREVIEW_SUPABASE_URL,
+          SOURCE_APP_DATABASE_URL: DEV_APP_URL,
+          SOURCE_SESSION_SECRET: "test-session-secret",
+          SOURCE_OPAQUE_REF_SECRET: "test-opaque-secret",
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: "test-anon-key-not-a-secret",
+        }),
+      /SUPABASE_SERVICE_ROLE_KEY is required/
+    );
+  });
+
+  it("rejects SOURCE_OBJECT_STORAGE=memory in preview", () => {
+    expectConfigError(
+      () =>
+        loadSourceEnvironment({
+          SOURCE_ENV: "preview",
+          NEXT_PUBLIC_SUPABASE_URL: DEV_PREVIEW_SUPABASE_URL,
+          SOURCE_APP_DATABASE_URL: DEV_APP_URL,
+          SOURCE_OBJECT_STORAGE: "memory",
+          ...SECRETS,
+        }),
+      /memory object storage is not allowed/
+    );
+  });
+
+  it("selects supabase object storage in preview when service role is present", () => {
+    const env = loadSourceEnvironment({
+      SOURCE_ENV: "preview",
+      NEXT_PUBLIC_SUPABASE_URL: DEV_PREVIEW_SUPABASE_URL,
+      SOURCE_APP_DATABASE_URL: DEV_APP_URL,
+      ...SECRETS,
+    });
+    expect(env.objectStorage).toBe("supabase");
+    expect(env.importBucket).toBe("source-imports");
   });
 });
