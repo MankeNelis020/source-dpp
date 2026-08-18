@@ -99,6 +99,10 @@ Internal `GET /api/internal/health` (cron secret) adds outbox backlog.
 
 `POST /api/internal/email/test` with cron secret, body `{ "to": "allow-listed@…" }`. Refused in production. Not a public arbitrary-email endpoint.
 
+On `EmailProviderError`, the HTTP response stays generic (`{"error":"ERROR","message":"Request failed."}`). SOURCE logs one JSON line to server logs (`event: "email.test.failed"`) with allow-listed fields only: provider, errorType, sanitized message, retryable, permanent, sourceEnv, emailMode, emailProvider, fromDomain, and Resend `statusCode` / `providerErrorName` when present.
+
+Never logged: API keys, full recipient, full From address, request body, portal URLs/tokens, cron/bypass/webhook secrets. This diagnostic is operational and safe to retain. It does not change Resend send or retry classification.
+
 ---
 
 ## Needs Niel (do not paste secret values into chat)

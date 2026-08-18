@@ -40,12 +40,19 @@ export interface EmailProvider {
 export class EmailProviderError extends Error {
   readonly retryable: boolean;
   readonly permanent: boolean;
+  readonly statusCode?: number;
+  readonly providerErrorName?: string;
 
-  constructor(message: string, options: { retryable?: boolean; permanent?: boolean } = {}) {
+  constructor(
+    message: string,
+    options: { retryable?: boolean; permanent?: boolean; statusCode?: number; providerErrorName?: string } = {}
+  ) {
     super(message);
     this.name = "EmailProviderError";
     this.retryable = options.retryable ?? true;
     this.permanent = options.permanent ?? false;
+    this.statusCode = options.statusCode;
+    this.providerErrorName = options.providerErrorName;
   }
 }
 

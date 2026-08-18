@@ -64,17 +64,29 @@ export class ResendEmailAdapter implements EmailProvider {
   }
 }
 
-function classifyResendError(error: unknown): EmailProviderError {
+export function classifyResendError(error: unknown): EmailProviderError {
   const message = error instanceof Error ? error.message : typeof error === "object" && error && "message" in error
     ? String((error as { message: unknown }).message)
     : String(error);
-  const status =
-    typeof error === "object" && error && "statusCode" in error ? Number((error as { statusCode: unknown }).statusCode) : undefined;
+  const meta = extractResendErrorMeta(error);
+  const status = meta.statusCode;
   if (/invalid recipient|not a valid email|validation|forbidden|unauthorized|401|403|422/i.test(message) || status === 422 || status === 400) {
-    return new EmailProviderError(message, { retryable: false, permanent: true });
+    return new EmailProviderError(message, { retryable: false, permanent: true, ...meta });
   }
   if (status === 429 || (status !== undefined && status >= 500) || /timeout|ETIMEDOUT|ECONNRESET|429|5\d\d|temporar|unavailable/i.test(message)) {
-    return new EmailProviderError(message, { retryable: true });
+    return new EmailProviderError(message, { retryable: true, ...meta });
   }
-  return new EmailProviderError(message, { retryable: true });
+  return new EmailProviderError(message, { retryable: true, ...meta });
+}
+
+/** Safe Resend metadata only. Does not change retry classification. */
+export function extractResendErrorMeta(error: unknown): { statusCode?: number; providerErrorName?: string } {
+  if (!error || typeof error !== "object") return {};
+  const rawStatus = "statusCode" in error ? Number((error as { statusCode: unknown }).statusCode) : Number.NaN;
+  const statusCode = Number.isInteger(rawStatus) && rawStatus >= 100 && rawStatus <= 599 ? rawStatus : undefined;
+  const rawName = "name" in error && typeof (error as { name: unknown }).name === "string"
+    ? (error as { name: string }).name
+    : undefined;
+  const providerErrorName = rawName && /^[a-z][a-z0-9_]{1,63}$/.test(rawName) ? rawName : undefined;
+  return { statusCode, providerErrorName };
 }

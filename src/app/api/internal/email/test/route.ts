@@ -2,15 +2,19 @@ import { jsonError } from "../../../source/_lib";
 import { getPersistence, getRuntimeEmailProvider, getSourceEnvironment } from "@/infrastructure/runtime";
 import { requireCronSecret } from "@/server/source/cron-auth";
 import { SourceError } from "@/server/source/types";
+import { EmailProviderError } from "@/infrastructure/email/port";
+import { logEmailTestFailure, safeEmailTestFailureDiagnostics } from "@/infrastructure/email/email-diagnostics";
 import { normalizeEmail, recipientAllowed } from "@/infrastructure/email/validate";
 import { renderSupplierRequestEmail } from "@/infrastructure/email/templates";
+import type { SourceEnvironment } from "@/infrastructure/environment/source-environment";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  let env: SourceEnvironment | undefined;
   try {
     requireCronSecret(request);
-    const env = getSourceEnvironment();
+    env = getSourceEnvironment();
     if (env.runtime === "production") {
       throw new SourceError("FORBIDDEN", "Test email is not available in production.", 403);
     }
@@ -47,6 +51,9 @@ export async function POST(request: Request) {
       acceptedAt: result.acceptedAt,
     });
   } catch (error) {
+    if (error instanceof EmailProviderError) {
+      logEmailTestFailure(safeEmailTestFailureDiagnostics({ error, env }));
+    }
     return jsonError(error);
   }
 }
