@@ -41,3 +41,5 @@ export function emailConfigurationStatus(env: SourceEnvironment): "configured" |
   if (env.resendApiKey && env.emailFrom && env.resendWebhookSecret) return "configured";
   return "unconfigured";
 }
+
+export { emailRuntimeClassification } from "./email-diagnostics";
