@@ -120,6 +120,33 @@ export class PostgresPersistence implements PersistencePort {
     return rows as Membership[];
   }
 
+  async saveOrganisation(org: Organisation) {
+    await this.q(
+      `INSERT INTO organisations (id, name, slug)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug`,
+      [org.id, org.name, org.slug]
+    );
+  }
+
+  async saveUser(user: UserRecord) {
+    await this.q(
+      `INSERT INTO users (id, email, display_name)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, display_name = EXCLUDED.display_name`,
+      [user.id, user.email, user.displayName]
+    );
+  }
+
+  async saveMembership(membership: Membership) {
+    await this.q(
+      `INSERT INTO memberships (id, user_id, organisation_id, role, capabilities)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (user_id, organisation_id) DO UPDATE SET role = EXCLUDED.role, capabilities = EXCLUDED.capabilities`,
+      [membership.id, membership.userId, membership.organisationId, membership.role, membership.capabilities]
+    );
+  }
+
   /**
    * One JSONB aggregate per organisation. Inside a command transaction this row is
    * locked FOR UPDATE. That is the intended pilot design: simple and serializable.
@@ -133,9 +160,8 @@ export class PostgresPersistence implements PersistencePort {
         organisationId,
       ]);
       if (!rows[0]) {
-        const empty = emptyState();
-        empty.tenant.id = organisationId;
-        return empty;
+        const org = await client.query("SELECT name FROM organisations WHERE id = $1", [organisationId]);
+        return emptyState({ id: organisationId, name: org.rows[0]?.name ?? organisationId });
       }
       return hydrateEngineState(rows[0].state_json as EngineState);
     });
@@ -149,6 +175,13 @@ export class PostgresPersistence implements PersistencePort {
    */
   async saveEngine(organisationId: string, state: EngineState) {
     await this.withTenant(organisationId, async (client) => {
+      const name = state.tenant.name || organisationId;
+      await client.query(
+        `INSERT INTO organisations (id, name, slug)
+         VALUES ($1,$2,$3)
+         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`,
+        [organisationId, name, organisationId]
+      );
       await client.query(
         `INSERT INTO engine_states (organisation_id, state_json, version, updated_at)
          VALUES ($1, $2::jsonb, $3, now())
@@ -313,126 +346,137 @@ export class PostgresPersistence implements PersistencePort {
   }
 
   async saveImportJob(job: ImportJob) {
-    await this.setTenant(job.organisationId);
-    await this.q(
-      `INSERT INTO import_jobs (
-         id, organisation_id, state, current_stage, processed_count, total_count, warning_count, error_count, review_count,
-         started_at, completed_at, mapping, summary, raw_records
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb)
-       ON CONFLICT (id) DO UPDATE SET
-         state = EXCLUDED.state, current_stage = EXCLUDED.current_stage, processed_count = EXCLUDED.processed_count,
-         total_count = EXCLUDED.total_count, warning_count = EXCLUDED.warning_count, error_count = EXCLUDED.error_count,
-         review_count = EXCLUDED.review_count, completed_at = EXCLUDED.completed_at, summary = EXCLUDED.summary,
-         mapping = EXCLUDED.mapping, raw_records = EXCLUDED.raw_records`,
-      [
-        job.id,
-        job.organisationId,
-        job.state,
-        job.currentStage ?? null,
-        job.processedCount,
-        job.totalCount,
-        job.warningCount,
-        job.errorCount,
-        job.reviewCount,
-        job.startedAt ?? null,
-        job.completedAt ?? null,
-        JSON.stringify(job.mapping ?? {}),
-        job.summary ? JSON.stringify(job.summary) : null,
-        job.rawRecords ? JSON.stringify(job.rawRecords) : null,
-      ]
-    );
+    await this.withTenant(job.organisationId, async (client) => {
+      await client.query(
+        `INSERT INTO import_jobs (
+           id, organisation_id, state, current_stage, processed_count, total_count, warning_count, error_count, review_count,
+           started_at, completed_at, mapping, summary, raw_records
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14::jsonb)
+         ON CONFLICT (id) DO UPDATE SET
+           state = EXCLUDED.state, current_stage = EXCLUDED.current_stage, processed_count = EXCLUDED.processed_count,
+           total_count = EXCLUDED.total_count, warning_count = EXCLUDED.warning_count, error_count = EXCLUDED.error_count,
+           review_count = EXCLUDED.review_count, completed_at = EXCLUDED.completed_at, summary = EXCLUDED.summary,
+           mapping = EXCLUDED.mapping, raw_records = EXCLUDED.raw_records`,
+        [
+          job.id,
+          job.organisationId,
+          job.state,
+          job.currentStage ?? null,
+          job.processedCount,
+          job.totalCount,
+          job.warningCount,
+          job.errorCount,
+          job.reviewCount,
+          job.startedAt ?? null,
+          job.completedAt ?? null,
+          JSON.stringify(job.mapping ?? {}),
+          job.summary ? JSON.stringify(job.summary) : null,
+          job.rawRecords ? JSON.stringify(job.rawRecords) : null,
+        ]
+      );
+    });
   }
 
   async getImportJob(id: string) {
-    const { rows } = await this.q(
-      `SELECT id, organisation_id AS "organisationId", state, current_stage AS "currentStage",
-              processed_count AS "processedCount", total_count AS "totalCount", warning_count AS "warningCount",
-              error_count AS "errorCount", review_count AS "reviewCount", started_at AS "startedAt",
-              completed_at AS "completedAt", mapping, summary, raw_records AS "rawRecords"
-       FROM import_jobs WHERE id = $1`,
-      [id]
-    );
-    return rows[0] as ImportJob | undefined;
+    const { rows } = await this.q("SELECT * FROM find_import_job_by_id($1)", [id]);
+    return rows[0] ? mapImportJob(rows[0]) : undefined;
   }
 
   async listImportJobs(organisationId: string) {
-    await this.setTenant(organisationId);
-    const { rows } = await this.q(
-      `SELECT id, organisation_id AS "organisationId", state FROM import_jobs WHERE organisation_id = $1`,
-      [organisationId]
-    );
-    return rows as ImportJob[];
+    return this.withTenant(organisationId, async (client) => {
+      const { rows } = await client.query(
+        `SELECT id, organisation_id AS "organisationId", state FROM import_jobs WHERE organisation_id = $1`,
+        [organisationId]
+      );
+      return rows as ImportJob[];
+    });
   }
 
   async appendImportEvent(event: ImportJobEvent) {
-    await this.q(
-      "INSERT INTO import_job_events (id, job_id, type, payload, created_at) VALUES ($1,$2,$3,$4::jsonb,$5)",
-      [event.id, event.jobId, event.type, JSON.stringify(event.payload), event.createdAt]
-    );
+    const job = await this.getImportJob(event.jobId);
+    if (!job) return;
+    await this.withTenant(job.organisationId, async (client) => {
+      await client.query(
+        "INSERT INTO import_job_events (id, job_id, type, payload, created_at) VALUES ($1,$2,$3,$4::jsonb,$5)",
+        [event.id, event.jobId, event.type, JSON.stringify(event.payload), event.createdAt]
+      );
+    });
   }
 
   async listImportEvents(jobId: string) {
-    const { rows } = await this.q(
-      `SELECT id, job_id AS "jobId", type, payload, created_at AS "createdAt" FROM import_job_events WHERE job_id = $1 ORDER BY created_at`,
-      [jobId]
-    );
-    return rows as ImportJobEvent[];
+    const job = await this.getImportJob(jobId);
+    if (!job) return [];
+    return this.withTenant(job.organisationId, async (client) => {
+      const { rows } = await client.query(
+        `SELECT id, job_id AS "jobId", type, payload, created_at AS "createdAt" FROM import_job_events WHERE job_id = $1 ORDER BY created_at`,
+        [jobId]
+      );
+      return rows as ImportJobEvent[];
+    });
   }
 
   async saveMappingProfile(profile: ImportMappingProfile) {
-    await this.setTenant(profile.organisationId);
-    await this.q(
-      `INSERT INTO import_mapping_profiles (id, organisation_id, source_format, mapping, mapping_version, created_at, updated_at)
-       VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7)
-       ON CONFLICT (organisation_id, source_format) DO UPDATE SET
-         mapping = EXCLUDED.mapping, mapping_version = EXCLUDED.mapping_version, updated_at = EXCLUDED.updated_at`,
-      [
-        profile.id,
-        profile.organisationId,
-        profile.sourceFormat,
-        JSON.stringify(profile.mapping),
-        profile.mappingVersion,
-        profile.createdAt,
-        profile.updatedAt,
-      ]
-    );
+    await this.withTenant(profile.organisationId, async (client) => {
+      await client.query(
+        `INSERT INTO import_mapping_profiles (id, organisation_id, source_format, mapping, mapping_version, created_at, updated_at)
+         VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7)
+         ON CONFLICT (organisation_id, source_format) DO UPDATE SET
+           mapping = EXCLUDED.mapping, mapping_version = EXCLUDED.mapping_version, updated_at = EXCLUDED.updated_at`,
+        [
+          profile.id,
+          profile.organisationId,
+          profile.sourceFormat,
+          JSON.stringify(profile.mapping),
+          profile.mappingVersion,
+          profile.createdAt,
+          profile.updatedAt,
+        ]
+      );
+    });
   }
 
   async getMappingProfile(organisationId: string, sourceFormat: string) {
-    await this.setTenant(organisationId);
-    const { rows } = await this.q(
-      `SELECT id, organisation_id AS "organisationId", source_format AS "sourceFormat", mapping,
-              mapping_version AS "mappingVersion", created_at AS "createdAt", updated_at AS "updatedAt"
-       FROM import_mapping_profiles WHERE organisation_id = $1 AND source_format = $2`,
-      [organisationId, sourceFormat]
-    );
-    return rows[0] as ImportMappingProfile | undefined;
+    return this.withTenant(organisationId, async (client) => {
+      const { rows } = await client.query(
+        `SELECT id, organisation_id AS "organisationId", source_format AS "sourceFormat", mapping,
+                mapping_version AS "mappingVersion", created_at AS "createdAt", updated_at AS "updatedAt"
+         FROM import_mapping_profiles WHERE organisation_id = $1 AND source_format = $2`,
+        [organisationId, sourceFormat]
+      );
+      return rows[0] as ImportMappingProfile | undefined;
+    });
   }
 
   async putEvidence(object: EvidenceObject) {
-    if (object.organisationId) await this.setTenant(object.organisationId);
-    await this.q(
-      `INSERT INTO evidence_objects (
-         evidence_id, owner_actor_id, organisation_id, storage_key, sha256, mime_type, size_bytes,
-         original_filename, issuer, uploaded_by, created_at, valid_from, valid_until, visibility
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-      [
-        object.evidenceId,
-        object.ownerActorId,
-        object.organisationId ?? null,
-        object.storageKey,
-        object.sha256,
-        object.mimeType,
-        object.size,
-        object.originalFilename,
-        object.issuer ?? null,
-        object.uploadedBy ?? null,
-        object.createdAt,
-        object.validFrom ?? null,
-        object.validUntil ?? null,
-        object.visibility,
-      ]
-    );
+    const write = async (client: Queryable) => {
+      await client.query(
+        `INSERT INTO evidence_objects (
+           evidence_id, owner_actor_id, organisation_id, storage_key, sha256, mime_type, size_bytes,
+           original_filename, issuer, uploaded_by, created_at, valid_from, valid_until, visibility
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        [
+          object.evidenceId,
+          object.ownerActorId,
+          object.organisationId ?? null,
+          object.storageKey,
+          object.sha256,
+          object.mimeType,
+          object.size,
+          object.originalFilename,
+          object.issuer ?? null,
+          object.uploadedBy ?? null,
+          object.createdAt,
+          object.validFrom ?? null,
+          object.validUntil ?? null,
+          object.visibility,
+        ]
+      );
+    };
+    if (object.organisationId) {
+      await this.withTenant(object.organisationId, write);
+      return;
+    }
+    await write(this.client ?? this.pool);
   }
 
   async getEvidence(evidenceId: string) {
@@ -491,7 +535,7 @@ export class PostgresPersistence implements PersistencePort {
   }
 
   async getOutbox(id: string) {
-    const { rows } = await this.q("SELECT * FROM outbox_events WHERE id = $1", [id]);
+    const { rows } = await this.q("SELECT * FROM find_outbox_by_id($1)", [id]);
     return rows[0] ? mapOutbox(rows[0]) : undefined;
   }
 
@@ -510,7 +554,7 @@ export class PostgresPersistence implements PersistencePort {
   }
 
   async countOutbox(status: OutboxStatus) {
-    const { rows } = await this.q("SELECT count(*)::int AS n FROM outbox_events WHERE status = $1", [status]);
+    const { rows } = await this.q("SELECT count_outbox_by_status($1)::int AS n", [status]);
     return rows[0]?.n ?? 0;
   }
 
@@ -540,7 +584,11 @@ export class PostgresPersistence implements PersistencePort {
   }
 
   async revokeSession(id: string, at = new Date()) {
-    await this.q("UPDATE sessions SET revoked_at = $2 WHERE id = $1", [id, at.toISOString()]);
+    const session = await this.getSession(id);
+    if (!session) return;
+    await this.withTenant(session.organisationId, async (client) => {
+      await client.query("UPDATE sessions SET revoked_at = $2 WHERE id = $1", [id, at.toISOString()]);
+    });
   }
 
   async findShareableTrustCandidates(input: {
@@ -565,6 +613,25 @@ export class PostgresPersistence implements PersistencePort {
       identityMatched: true,
     }));
   }
+}
+
+function mapImportJob(row: Record<string, unknown>): ImportJob {
+  return {
+    id: String(row.id),
+    organisationId: String(row.organisation_id ?? row.organisationId),
+    state: String(row.state) as ImportJob["state"],
+    currentStage: (row.current_stage ?? row.currentStage) as ImportJob["currentStage"],
+    processedCount: Number(row.processed_count ?? row.processedCount ?? 0),
+    totalCount: Number(row.total_count ?? row.totalCount ?? 0),
+    warningCount: Number(row.warning_count ?? row.warningCount ?? 0),
+    errorCount: Number(row.error_count ?? row.errorCount ?? 0),
+    reviewCount: Number(row.review_count ?? row.reviewCount ?? 0),
+    startedAt: (row.started_at ?? row.startedAt) as string | undefined,
+    completedAt: (row.completed_at ?? row.completedAt) as string | undefined,
+    mapping: (row.mapping as ImportJob["mapping"]) ?? {},
+    summary: (row.summary as ImportJob["summary"]) ?? undefined,
+    rawRecords: (row.raw_records ?? row.rawRecords) as ImportJob["rawRecords"],
+  };
 }
 
 function mapOutbox(row: Record<string, unknown>): OutboxRecord {

@@ -7,16 +7,18 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run --exclude src/server/source/p01-postgres.test.ts",
-    "test:postgres": "vitest run src/server/source/p01-postgres.test.ts"
+    "test": "vitest run --exclude src/server/source/p01-postgres.test.ts --exclude src/server/source/b1-runtime-persistence.test.ts",
+    "test:postgres": "vitest run --fileParallelism=false src/server/source/p01-postgres.test.ts src/server/source/b1-runtime-persistence.test.ts",
+    "db:migrate": "tsx src/infrastructure/database/migrate-cli.ts",
+    "db:seed": "tsx src/infrastructure/database/seed-cli.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",
     "next": "16.3.0",
+    "pg": "^8.16.3",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "tailwind-merge": "^3.6.0",
-    "pg": "^8.16.3"
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -27,6 +29,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
     "tailwindcss": "^4",
+    "tsx": "^4.23.12",
     "typescript": "^5",
     "vitest": "^4.1.10"
   }

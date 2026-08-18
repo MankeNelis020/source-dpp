@@ -5,11 +5,13 @@ The Missing Information Engine. Connect your product system. SOURCE detects what
 This repository is a strangler migration of the Missing Information Engine: domain behaviour stays in `src/domain/source`, while business truth, authorization, and persistence live in `src/server/source`. The browser consumes authorized projections — not the full engine state.
 
 See `docs/architecture/p0-production.md` for the P0 audit, schema, threat model, and test plan.
+See `docs/operations/environments.md` for local, preview, and production persistence configuration.
 
 ```bash
 npm install
 npm run dev
 npm test
+npm run db:migrate   # when using Postgres; requires SOURCE_MIGRATOR_DATABASE_URL or local DATABASE_URL
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
