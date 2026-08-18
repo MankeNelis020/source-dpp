@@ -7,7 +7,8 @@ import { createServerSupabaseClient } from "./server";
  * SOURCE membership rows remain the authorization source.
  */
 export class SupabaseIdentityProvider implements IdentityProvider {
-  async getAuthenticatedUser(_request: Request): Promise<AuthIdentity | null> {
+  async getAuthenticatedUser(request: Request): Promise<AuthIdentity | null> {
+    void request;
     const supabase = await createServerSupabaseClient();
     const { data, error } = await supabase.auth.getUser();
     if (error || !data.user?.id || !data.user.email) return null;

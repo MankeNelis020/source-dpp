@@ -14,7 +14,6 @@ import {
 import { encodeActiveOrganisation } from "@/server/source/principal";
 import { hashToken } from "@/infrastructure/crypto/tokens";
 import { ROLE_CAPABILITIES } from "@/server/source/authorization";
-import { SourceError } from "@/server/source/types";
 import { GET as getWorkspace } from "@/app/api/source/workspace/route";
 import { GET as getTeam } from "@/app/api/organisations/team/route";
 import { loadSourceEnvironment, SourceEnvironmentError } from "@/infrastructure/environment/source-environment";

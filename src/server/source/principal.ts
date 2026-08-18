@@ -12,7 +12,8 @@ import {
 } from "@/server/source/organisations";
 import type { Principal } from "@/server/source/types";
 import { SourceError } from "@/server/source/types";
-import { hasCapability, type Capability } from "@/server/source/authorization";
+import { hasCapability } from "@/server/source/authorization";
+import type { Capability } from "@/server/source/types";
 
 export const ACTIVE_ORG_COOKIE = "source_organisation";
 
