@@ -1,4 +1,4 @@
-import { jsonError, principalFromRequest } from "../../_lib";
+import { jsonError, principalFromRequest } from "../_lib";
 import { getPersistence } from "@/infrastructure/runtime";
 import { getPilotResults } from "@/server/source/queries";
 
