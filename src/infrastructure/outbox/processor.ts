@@ -38,10 +38,15 @@ export async function processOutboxBatch(args: {
 
   for (const row of batch) {
     try {
+      const to = String(row.payload.to ?? "");
+      if (!to) {
+        throw new Error("invalid recipient");
+      }
       await args.email.send({
-        to: "noreply@source.invalid",
-        subject: String(row.payload.kind ?? row.eventType),
-        text: "SOURCE operational notification.",
+        to,
+        subject: String(row.payload.subject ?? row.eventType),
+        text: String(row.payload.text ?? "SOURCE operational notification."),
+        html: typeof row.payload.html === "string" ? row.payload.html : undefined,
         idempotencyKey: row.semanticKey,
       });
       await processor.markSucceeded(row.id, now);
