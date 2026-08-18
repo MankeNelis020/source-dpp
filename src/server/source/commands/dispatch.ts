@@ -17,7 +17,7 @@ import { propagateReadyClaim } from "@/domain/source/propagation";
 import { structuredCommandAudit } from "../audit";
 import type { AnyPrincipal, CommandEnvelope, CommandOutcome, Principal } from "../types";
 import { SourceError } from "../types";
-import { queueSupplierOutreach } from "@/server/source/outreach";
+import { persistQueuedOutreach, queueSupplierOutreach } from "@/server/source/outreach";
 import { durableEvidenceRequired } from "@/infrastructure/runtime";
 
 function caseIdOf(command: Command): string | undefined {
@@ -47,10 +47,24 @@ async function outboxForEvents(args: {
     if (event.type === "case.escalated" && request?.executedEscalationActions?.includes("secondary_contact")) {
       semanticKey = semanticSecondaryContactKey(caseId);
     }
+    if (event.type === "request.contact_changed") {
+      const n = (state.requests.find((item) => item.caseId === caseId)?.executedEscalationActions ?? []).filter((a) =>
+        a.includes("contact")
+      ).length || 1;
+      semanticKey = `${caseId}:MANUAL_RESEND:${n}:v1`;
+    }
+    if (event.type === "request.forwarded") {
+      const actorId = state.cases.find((c) => c.id === caseId)?.currentActorId;
+      if (actorId) semanticKey = `${caseId}:UPSTREAM:${actorId}:v1`;
+    }
     if (!semanticKey) continue;
     const supplierActorId = request?.supplierId ?? state.cases.find((c) => c.id === caseId)?.currentActorId;
     if (!supplierActorId) continue;
-    const row = await queueSupplierOutreach({
+    if (event.type === "AUTO_REMINDER_SENT") {
+      const email = state.contacts.find((c) => c.actorId === supplierActorId && c.valid)?.email;
+      if (state.contacts.some((c) => c.actorId === supplierActorId && c.email === email && c.doNotContact)) continue;
+    }
+    const queued = await queueSupplierOutreach({
       store,
       organisationId,
       organisationName,
@@ -59,8 +73,15 @@ async function outboxForEvents(args: {
       caseIds: [caseId],
       semanticKey,
       now,
+      templateId: event.type === "AUTO_REMINDER_SENT" || event.type === "request.contact_changed"
+        ? event.type === "AUTO_REMINDER_SENT"
+          ? "REMINDER"
+          : "SUPPLIER_REQUEST"
+        : event.type === "request.forwarded"
+          ? "UPSTREAM"
+          : "SUPPLIER_REQUEST",
     });
-    if (row) rows.push(row);
+    if (queued && (await persistQueuedOutreach(store, queued, now))) rows.push(queued.outbox);
   }
   return rows;
 }
@@ -248,7 +269,6 @@ async function executeCommand(args: {
     })
   );
 
-  for (const row of outbox) await tx.insertOutbox(row);
   metricInc(METRICS.commandsProcessed);
   logOperational("command.processed", {
     organisationId,

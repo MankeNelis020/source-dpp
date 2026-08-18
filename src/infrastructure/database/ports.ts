@@ -14,6 +14,7 @@ import type {
 } from "@/server/source/types";
 import type { OutboxRecord, OutboxStatus } from "@/infrastructure/outbox/types";
 import type { StorageObjectRecord } from "@/infrastructure/storage/port";
+import type { EmailProviderEventRecord, OutboundMessageRecord } from "@/infrastructure/email/transport";
 
 export type { StorageObjectRecord } from "@/infrastructure/storage/port";
 
@@ -122,6 +123,16 @@ export interface PersistencePort {
   getOutbox(id: string): MaybePromise<OutboxRecord | undefined>;
   listOutbox(status?: OutboxStatus, organisationId?: string): MaybePromise<OutboxRecord[]>;
   countOutbox(status: OutboxStatus): MaybePromise<number>;
+  updateOutboxPayload(id: string, payload: Record<string, unknown>): MaybePromise<void>;
+  resetOutboxForRetry(id: string, availableAt?: Date): MaybePromise<boolean>;
+
+  saveOutboundMessage(record: OutboundMessageRecord): MaybePromise<void>;
+  getOutboundMessage(id: string): MaybePromise<OutboundMessageRecord | undefined>;
+  getOutboundMessageBySemanticKey(organisationId: string, semanticKey: string): MaybePromise<OutboundMessageRecord | undefined>;
+  getOutboundMessageByProviderId(provider: string, providerMessageId: string): MaybePromise<OutboundMessageRecord | undefined>;
+  listOutboundMessages(organisationId: string, caseId?: string): MaybePromise<OutboundMessageRecord[]>;
+  insertEmailProviderEvent(record: EmailProviderEventRecord): MaybePromise<boolean>;
+  getEmailProviderEvent(provider: string, providerEventId: string): MaybePromise<EmailProviderEventRecord | undefined>;
 
   saveSession(session: SessionRecord): MaybePromise<void>;
   getSession(id: string): MaybePromise<SessionRecord | undefined>;

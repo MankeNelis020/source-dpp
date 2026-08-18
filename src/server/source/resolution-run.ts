@@ -6,7 +6,7 @@ import { findReusableClaimsForRequirement } from "@/server/source/network";
 import type { Principal } from "@/server/source/types";
 import { SourceError } from "@/server/source/types";
 import { hasCapability } from "@/server/source/authorization";
-import { queueSupplierOutreach } from "@/server/source/outreach";
+import { persistQueuedOutreach, queueSupplierOutreach } from "@/server/source/outreach";
 
 const ACTIVE_REQUEST_STATES = new Set([
   "DRAFT",
@@ -48,12 +48,14 @@ export async function executeResolutionRun(store: PersistencePort, principal: Pr
         groups: state.requestGroups.length,
         requestCount: state.requests.length,
         alreadyExecuted: true,
+        emailsQueued: 0,
       };
     }
 
     const started = Date.now();
     run.executionStartedAt = run.executionStartedAt ?? now.toISOString();
     const requestIdsBefore = new Set(state.requests.map((r) => r.id));
+    const authBySupplier = new Map<string, string[]>();
 
     const open = state.cases.filter(
       (c) => !["READY", "MONITORING", "UNRESOLVED", "WAITING_RESPONSE", "WAITING_UPSTREAM"].includes(c.state)
@@ -102,6 +104,11 @@ export async function executeResolutionRun(store: PersistencePort, principal: Pr
           avoidedBy: "AUTHORIZATION_ONLY",
           timestamp: now.toISOString(),
         });
+        if (resolution.currentActorId) {
+          const list = authBySupplier.get(resolution.currentActorId) ?? [];
+          list.push(resolution.id);
+          authBySupplier.set(resolution.currentActorId, list);
+        }
         continue;
       }
 
@@ -147,7 +154,7 @@ export async function executeResolutionRun(store: PersistencePort, principal: Pr
     }
     let emailsQueued = 0;
     for (const [supplierActorId, caseIds] of newBySupplier) {
-      const row = await queueSupplierOutreach({
+      const queued = await queueSupplierOutreach({
         store: tx,
         organisationId: principal.organisationId,
         organisationName: state.tenant.name,
@@ -157,8 +164,23 @@ export async function executeResolutionRun(store: PersistencePort, principal: Pr
         semanticKey: `${run.id}:SUPPLIER:${supplierActorId}:v1`,
         now,
       });
-      if (row) {
-        await tx.insertOutbox(row);
+      if (queued && (await persistQueuedOutreach(tx, queued, now))) {
+        emailsQueued += 1;
+      }
+    }
+    for (const [supplierActorId, caseIds] of authBySupplier) {
+      const queued = await queueSupplierOutreach({
+        store: tx,
+        organisationId: principal.organisationId,
+        organisationName: state.tenant.name,
+        state,
+        supplierActorId,
+        caseIds,
+        semanticKey: `${run.id}:AUTH:${supplierActorId}:v1`,
+        now,
+        templateId: "AUTHORIZATION",
+      });
+      if (queued && (await persistQueuedOutreach(tx, queued, now))) {
         emailsQueued += 1;
       }
     }
@@ -193,6 +215,7 @@ export async function executeResolutionRun(store: PersistencePort, principal: Pr
       run: state.pilotRuns[state.pilotRuns.length - 1],
       groups: state.requestGroups.length,
       requestCount: state.requests.length,
+      emailsQueued,
       alreadyExecuted: false,
     };
   });

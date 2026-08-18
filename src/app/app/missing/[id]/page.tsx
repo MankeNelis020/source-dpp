@@ -30,6 +30,15 @@ interface CaseDetail {
   exception?: { headline: string; reason: string; nextAction: string; automationPolicy: string };
   conflict?: { leftLabel: string; leftValue: string; rightLabel: string; rightValue: string };
   contacts: { id: string; role: string; name: string; valid: boolean }[];
+  delivery?: {
+    status: string;
+    label: string;
+    queuedAt?: string;
+    providerAcceptedAt?: string;
+    deliveredAt?: string;
+    bouncedAt?: string;
+    nextReminderAt?: string;
+  };
 }
 
 export default function ResolutionCasePage() {
@@ -83,10 +92,23 @@ export default function ResolutionCasePage() {
 
       <section className="mt-10 border border-[#101A15]/10 bg-[#FBFCFA] p-5">
         <SourceLabel>What happens next</SourceLabel>
-        <p className="mt-2 text-[14.5px] leading-relaxed">{resolution.nextAction}</p>
-        {resolution.nextActionAt ? (
+        <p className="mt-2 text-[14.5px] leading-relaxed">
+          {resolution.delivery?.status === "BOUNCED"
+            ? "Email could not be delivered. SOURCE needs another contact."
+            : resolution.delivery?.label ?? resolution.nextAction}
+        </p>
+        {resolution.delivery?.queuedAt ? (
           <p className="mt-2 font-[family-name:var(--font-plex)] text-[12px] text-[#101A15]/55">
-            Next action at {formatWhen(resolution.nextActionAt)}
+            Requested {formatWhen(resolution.delivery.queuedAt)}
+            {resolution.delivery.deliveredAt ? ` · Email delivered ${formatWhen(resolution.delivery.deliveredAt)}` : ""}
+            {resolution.delivery.providerAcceptedAt && !resolution.delivery.deliveredAt
+              ? ` · Email sent ${formatWhen(resolution.delivery.providerAcceptedAt)}`
+              : ""}
+          </p>
+        ) : null}
+        {resolution.nextActionAt && resolution.delivery?.status !== "BOUNCED" && resolution.delivery?.status !== "COMPLAINED" ? (
+          <p className="mt-2 font-[family-name:var(--font-plex)] text-[12px] text-[#101A15]/55">
+            Next reminder {formatWhen(resolution.nextActionAt)}
           </p>
         ) : null}
         <div className="mt-5 flex flex-wrap gap-2">

@@ -1,6 +1,6 @@
 # Data inventory (pilot)
 
-This is a category map for SOURCE customer data after PR B2. It is not a GDPR Record of Processing. Full deletion workflow is not in this PR. Ownership index rows (`storage_objects`) are kept so later deletion is possible.
+This is a category map for SOURCE customer data after PR C. It is not a GDPR Record of Processing.
 
 The engine is unchanged: `InformationRequirement → ResolutionCase → ResolutionAttempt(s) → Readiness`.
 
@@ -43,6 +43,18 @@ SHA-256 is stored for integrity. Hash equality is not permission to reuse eviden
 Where stored: Postgres (`supplier_portal_grants`), token hash only.
 
 Access: bearer token to scoped commands and scoped uploads only. Grant expiry/revocation is re-checked at evidence finalization.
+
+Retention: until expiry/revocation plus audit window. Raw tokens are not stored.
+
+---
+
+## Supplier email and delivery
+
+Where stored: Postgres `outbound_messages` (recipient, template id/version, transport status, provider message id, grant id, case/request refs) and `email_provider_events` (provider event id, type, times). Outbox payload may hold rendered body only until send succeeds, then it is redacted. Full HTML is not retained indefinitely.
+
+Access: tenant-private under RLS + SOURCE authorization. Confidential upstream recipients are not projected to downstream manufacturers.
+
+Retention (pilot direction): keep transport metadata and template version for the life of the case. Do not keep rendered bodies by default. Provider payloads are not blindly logged; persist structured fields only.
 
 ---
 

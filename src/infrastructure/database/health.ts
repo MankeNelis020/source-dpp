@@ -6,6 +6,8 @@ export interface PersistenceHealth {
   database: "ok" | "error";
   persistence: PersistenceAdapterKind;
   storage?: "ok" | "error";
+  email?: "configured" | "unconfigured" | "test";
+  outboxBacklog?: number;
 }
 
 export async function checkPostgresHealth(pool: Pool): Promise<PersistenceHealth> {
@@ -31,6 +33,7 @@ export async function checkPostgresHealth(pool: Pool): Promise<PersistenceHealth
     await client.query("SELECT 1 FROM import_jobs LIMIT 0");
     await client.query("SELECT 1 FROM organisations LIMIT 0");
     await client.query("SELECT 1 FROM storage_objects LIMIT 0");
+    await client.query("SELECT 1 FROM outbound_messages LIMIT 0");
     return { database: "ok", persistence: "postgres", storage: "ok" };
   } catch (error) {
     if (error instanceof SourceEnvironmentError) throw error;

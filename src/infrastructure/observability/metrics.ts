@@ -20,7 +20,7 @@ export function logOperational(event: string, fields: Record<string, string | nu
   const safe: Record<string, string | number | boolean> = { event };
   for (const [key, value] of Object.entries(fields)) {
     if (value === undefined) continue;
-    if (/token|secret|password|filename|actorName|legalName/i.test(key)) continue;
+    if (/token|secret|password|filename|actorName|legalName|portalUrl|recipient|html|text/i.test(key)) continue;
     safe[key] = value;
   }
   safe.ts = new Date().toISOString();
@@ -46,4 +46,10 @@ export const METRICS = {
   storageSignedReads: "storage.signed_reads",
   storageRejected: "storage.rejected",
   storageTempCleanup: "storage.temp_cleanup",
+  emailsQueued: "emails.queued",
+  emailsProviderAccepted: "emails.provider_accepted",
+  emailsDelivered: "emails.delivered",
+  emailsBounced: "emails.bounced",
+  emailsComplained: "emails.complained",
+  emailsFailed: "emails.failed",
 } as const;

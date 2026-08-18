@@ -184,6 +184,7 @@ export function evaluatePilotRun(state: EngineState, run: PilotRun): PilotEvalua
       .filter((r) => Date.parse(r.sentAt ?? run.executionStartedAt ?? run.startedAt) >= started)
       .map((r) => r.supplierId)
   );
+  // Unique supplier conversations, not per-requirement emails or transport retries.
   const newClaims = state.claims.filter((c) => c.ready && (c.requirementId ? cohort.has(c.requirementId) : true));
   const propagated = resolvedSameTenant;
   const denom = Math.max(1, run.baseline.missingRequirementIds.length);

@@ -277,6 +277,8 @@ export interface ContactPoint {
   name: string;
   email: string;
   valid: boolean;
+  primary?: boolean;
+  doNotContact?: boolean;
   lastSuccessAt?: string;
 }
 

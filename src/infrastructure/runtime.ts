@@ -8,6 +8,9 @@ import { getMemoryEvidenceStorage, type EvidenceStorage } from "@/infrastructure
 import { createRuntimeObjectStorage } from "@/infrastructure/storage/factory";
 import { getMemoryObjectStorage, resetMemoryObjectStorage } from "@/infrastructure/storage/memory";
 import type { ObjectStorage } from "@/infrastructure/storage/port";
+import { createRuntimeEmailProvider } from "@/infrastructure/email/factory";
+import type { EmailProvider } from "@/infrastructure/email/port";
+import { getSharedTestEmailProvider, resetSharedTestEmailProvider } from "@/infrastructure/email/test-provider";
 import {
   isNextBuildPhase,
   loadSourceEnvironment,
@@ -20,6 +23,8 @@ let lastHealth: PersistenceHealth | undefined;
 let bootError: Error | undefined;
 let objectStorage: ObjectStorage | undefined;
 let objectStorageOverride: ObjectStorage | undefined;
+let emailProvider: EmailProvider | undefined;
+let emailProviderOverride: EmailProvider | undefined;
 
 export function isPostgresConfigured(): boolean {
   if (isNextBuildPhase()) return false;
@@ -73,6 +78,26 @@ export function setRuntimeObjectStorage(storage: ObjectStorage | undefined) {
   objectStorageOverride = storage;
 }
 
+export function getRuntimeEmailProvider(): EmailProvider {
+  if (emailProviderOverride) return emailProviderOverride;
+  if (emailProvider) return emailProvider;
+  if (isNextBuildPhase()) {
+    emailProvider = getSharedTestEmailProvider();
+    return emailProvider;
+  }
+  try {
+    emailProvider = createRuntimeEmailProvider(loadSourceEnvironment());
+    return emailProvider;
+  } catch (error) {
+    bootError = error instanceof Error ? error : new SourceEnvironmentError("SOURCE runtime failed to start.");
+    throw bootError;
+  }
+}
+
+export function setRuntimeEmailProvider(provider: EmailProvider | undefined) {
+  emailProviderOverride = provider;
+}
+
 export function getRuntimeEvidenceStorage(): EvidenceStorage {
   return getMemoryEvidenceStorage();
 }
@@ -90,7 +115,10 @@ export function resetRuntimeForTests() {
   bootError = undefined;
   objectStorage = undefined;
   objectStorageOverride = undefined;
+  emailProvider = undefined;
+  emailProviderOverride = undefined;
   resetMemoryObjectStorage();
+  resetSharedTestEmailProvider();
 }
 
 /**
@@ -125,6 +153,7 @@ export async function bootSourceRuntime(): Promise<RuntimePersistence> {
       const env = loadSourceEnvironment();
       runtime = createRuntimePersistence(env);
       objectStorage = createRuntimeObjectStorage(env);
+      emailProvider = createRuntimeEmailProvider(env);
     } catch (error) {
       bootError =
         error instanceof Error ? error : new SourceEnvironmentError("SOURCE runtime failed to start.");
@@ -160,6 +189,7 @@ function getRuntime(): RuntimePersistence {
     const env = loadSourceEnvironment();
     runtime = createRuntimePersistence(env);
     objectStorage = createRuntimeObjectStorage(env);
+    emailProvider = createRuntimeEmailProvider(env);
   } catch (error) {
     bootError =
       error instanceof Error ? error : new SourceEnvironmentError("SOURCE runtime failed to start.");
