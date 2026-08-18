@@ -39,7 +39,7 @@ export const SOURCE_TONE =
   "Precies, bescheiden, infrastructureel. Schrijf als een auditor die je aardig vindt: exact, kort, nooit meer belovend dan het bewijs draagt. Toon status, niet waarheid. Noem het getal. Actieve stem. Ontbrekend bewijs is zichtbaar. Engelse producttermen (claim, evidence, reuse, provenance) blijven Engels.";
 
 export const SOURCE_MISSION =
-  "The evidence layer for product data. Connect your product system. SOURCE resolves what you have, what is missing, what can be trusted and what may be reused.";
+  "SOURCE is Digital Product Passport readiness software for European manufacturers, importers and private-label brands. It connects an existing product catalogue, resolves product and supplier identity, shows what evidence exists and what is missing, and helps collect that evidence from suppliers.";
 
 export const SOURCE_VISUAL_STYLE = {
   logoPosition: "top-left" as const,
@@ -56,8 +56,7 @@ export const SOURCE_VISUAL_STYLE = {
 export const PUBLIC_NAV = [
   { href: "/product", label: "Product" },
   { href: "/how-it-works", label: "How it works" },
-  { href: "/suppliers", label: "For suppliers" },
-  { href: "/developers", label: "Developers" },
+  { href: "/digital-product-passport", label: "Digital Product Passport" },
   { href: "/pricing", label: "Pricing" },
 ] as const;
 
