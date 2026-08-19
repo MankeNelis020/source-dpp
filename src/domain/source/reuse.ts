@@ -20,6 +20,10 @@ export function evaluateReuse(args: {
     (args.evidence?.validUntil ? new Date(args.evidence.validUntil) < args.now : false);
   if (expired) return "EXPIRED";
 
+  // Same-subject use is the original authorised application, not a new reuse.
+  // Cross-product discovery uses effectiveReusePolicy() / discoverReusableEvidence().
+  if (args.evidence?.reusePolicy === "NO_REUSE") return "NONE";
+
   if (!trustMeets(args.claim.trustLevel, args.requirement.requiredTrustLevel)) {
     if (args.permission?.visibility === "verification_only") return "VERIFICATION_ONLY_AVAILABLE";
     return "NONE";

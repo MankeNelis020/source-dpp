@@ -137,6 +137,50 @@ export function evaluateEvidenceDisclosure(args: {
 }): DisclosureDecision {
   const { evidence, capabilities } = args;
   const ownerConfidential = isConfidentialActor(args.state, evidence.ownerActorId);
+  const mode = evidence.disclosureMode;
+
+  if (mode === "VERIFICATION_ONLY") {
+    return decision("ATTESTATION_ONLY", {
+      reason: "verification-only-disclosure",
+      canRevealValidity: true,
+    });
+  }
+
+  if (mode === "PROTECTED_SOURCE" || mode === "CANNOT_DISCLOSE") {
+    return decision("ATTESTATION_ONLY", {
+      reason: "protected-source-disclosure",
+      canRevealValidity: true,
+    });
+  }
+
+  if (mode === "SHARE_SOURCE") {
+    if (ownerConfidential) {
+      return decision("ATTESTATION_ONLY", {
+        reason: "protected-upstream-evidence",
+        canRevealValidity: true,
+      });
+    }
+    if (!capabilities.includes("evidence:read_private") && evidence.visibility !== "public") {
+      return decision("ATTESTATION_ONLY", {
+        reason: "share-source-without-capability",
+        canRevealValidity: true,
+      });
+    }
+    if (!capabilities.includes("evidence:read")) {
+      return decision("NONE", { reason: "no-evidence-read" });
+    }
+    return decision("FULL", {
+      reason: "share-source-authorized",
+      canRevealEvidenceId: false,
+      canRevealFilename: true,
+      canRevealIssuer: true,
+      canRevealValue: true,
+      canRevealValidity: true,
+      canRevealOwner: true,
+      canRevealHash: true,
+      canIssueSignedUrl: capabilities.includes("evidence:export") || capabilities.includes("evidence:read_private"),
+    });
+  }
 
   if (evidence.visibility === "protected" || ownerConfidential) {
     return decision("ATTESTATION_ONLY", {

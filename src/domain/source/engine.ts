@@ -11,16 +11,35 @@ import { defaultPropertiesForKind, productIdsForSubject } from "./subjects";
 import { gatherPlannerInput, planResolution } from "./planner";
 import { evidenceScopeApplies } from "./propagation";
 import { recordContactAvoided, recordRequirementOutcome } from "./analytics";
+import { currentDataDisclosureTerms, dataDisclosureTermsByVersion } from "./disclosure-terms";
+import {
+  assessRequirementSufficiency,
+  classifyEvidenceStrength,
+  defaultEvidenceReusePolicy,
+  documentaryRoute,
+  isSupportedReusePolicy,
+  mapDisclosureModeToEvidenceVisibility,
+  mapDisclosureModeToPermissionVisibility,
+  reuseRank,
+} from "./evidence-policy";
+import {
+  findReuseConsent,
+  inheritedDisclosureMode,
+  reuseConsentKey,
+} from "./reuse-consent";
 import type {
   AuditEvent,
   ClaimRecord,
   Command,
   ContactPoint,
+  DisclosureAgreementAcceptance,
   EngineResult,
   EngineState,
   EvidenceRecord,
+  EvidenceReuseConsent,
   ExceptionCode,
   PermissionGrant,
+  RequirementEvidenceAssessment,
   ResolutionAttempt,
   ResolutionCase,
   ResolutionMechanism,
@@ -28,11 +47,24 @@ import type {
   SupplierRequest,
 } from "./types";
 
+export class EngineValidationError extends Error {
+  readonly code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "EngineValidationError";
+    this.code = code;
+  }
+}
+
 export function hydrateEngineState(state: EngineState): EngineState {
   state.requirementOutcomes ??= [];
   state.contactAvoidances ??= [];
   state.pilotRuns ??= [];
   state.requestGroups ??= [];
+  state.disclosureAcceptances ??= [];
+  state.requirementAssessments ??= [];
+  state.cannotProvideResponses ??= [];
+  state.reuseConsents ??= [];
   return state;
 }
 
@@ -63,6 +95,10 @@ export function emptyState(tenant?: { id: string; name: string }): EngineState {
     contactAvoidances: [],
     pilotRuns: [],
     requestGroups: [],
+    disclosureAcceptances: [],
+    requirementAssessments: [],
+    cannotProvideResponses: [],
+    reuseConsents: [],
     tenant: {
       id: tenant?.id ?? "acme",
       name: tenant?.name ?? "Acme Manufacturing B.V.",
@@ -114,8 +150,14 @@ export function applyCommand(state: EngineState, command: Command, now: Date): E
     case "DECLINE":
       decline(next, command, now, emit);
       return done(next, events, command.caseId);
+    case "ACCEPT_EVIDENCE_DISCLOSURE":
+      acceptEvidenceDisclosure(next, command, now, emit);
+      return done(next, events, command.caseId);
     case "SUBMIT_RESPONSE":
       submitResponse(next, command, now, emit);
+      return done(next, events, command.caseId);
+    case "DECIDE_EVIDENCE_REUSE":
+      decideEvidenceReuse(next, command, now, emit);
       return done(next, events, command.caseId);
     case "GRANT_PERMISSION":
       setPermission(next, command.caseId, "GRANTED", now, emit);
@@ -422,7 +464,7 @@ function openRequirement(
     payload: { strategy: plan.strategy },
   });
 
-  if (plan.candidateClaimId) {
+  if (plan.candidateClaimId && plan.strategy === "exact_trusted_claim") {
     const claim = state.claims.find((c) => c.id === plan.candidateClaimId);
     if (claim) claim.caseId = resolution.id;
   }
@@ -480,6 +522,72 @@ function openRequirement(
       payload: { avoidedBy: "AUTHORIZATION_ONLY" },
     });
     return done(state, state.events.filter((e) => e.caseId === resolution.id || e.type === "requirement.created"), resolution.id);
+  }
+
+  if (plan.strategy === "same_org_reuse" && plan.candidateEvidenceId && plan.candidateClaimId) {
+    const sourceClaim = state.claims.find((c) => c.id === plan.candidateClaimId);
+    const evidence = state.evidence.find((e) => e.id === plan.candidateEvidenceId);
+    if (sourceClaim && evidence) {
+      applyExistingEvidenceToCase(state, resolution, evidence, sourceClaim, now, emit, "SAME_TENANT_REUSE");
+      recordContactAvoided(state, {
+        requirementId: requirement.id,
+        caseId: resolution.id,
+        supplierActorId: resolution.currentActorId,
+        avoidedBy: "EXISTING_CLAIM",
+        claimId: sourceClaim.id,
+        evidenceId: evidence.id,
+        timestamp: iso(now),
+      });
+      emit({
+        type: "evidence.reused",
+        caseId: resolution.id,
+        actor: "SOURCE_SYSTEM",
+        timestamp: iso(now),
+        detail: "Compatible organisation-scoped evidence was reused without asking again.",
+        payload: { evidenceId: evidence.id, sourceClaimId: sourceClaim.id },
+      });
+    }
+    if (caseById(state, resolution.id).state === "READY") {
+      return done(state, state.events.filter((e) => e.caseId === resolution.id || e.type === "requirement.created" || e.type === "evidence.reused"), resolution.id);
+    }
+  }
+
+  if (plan.strategy === "reuse_consent_required" && plan.candidateEvidenceId && plan.candidateClaimId) {
+    const sourceClaim = state.claims.find((c) => c.id === plan.candidateClaimId);
+    const evidence = state.evidence.find((e) => e.id === plan.candidateEvidenceId);
+    if (sourceClaim && evidence) {
+      const consent = upsertReuseConsent(state, resolution, evidence, sourceClaim, now, emit);
+      if (consent.status === "DECLINED") {
+        // Fall through to a normal supplier request.
+      } else if (consent.status === "APPROVED") {
+        applyExistingEvidenceToCase(state, resolution, evidence, sourceClaim, now, emit, "SAME_TENANT_REUSE");
+        return done(state, state.events.filter((e) => e.caseId === resolution.id || e.type === "requirement.created"), resolution.id);
+      } else {
+        resolution.state = "AUTHORIZATION_REQUIRED";
+        fail(state, resolution, "REUSE_CONSENT_REQUIRED", now, {
+          nextAction: "Ask the supplier whether this existing evidence may be used for this request.",
+          nextActionAt: addDays(now, 3),
+        });
+        emit({
+          type: "reuse.consent_requested",
+          caseId: resolution.id,
+          actor: "SOURCE_SYSTEM",
+          timestamp: iso(now),
+          detail: "Existing evidence may be relevant. Waiting for supplier reuse permission.",
+          payload: { consentId: consent.id, evidenceId: evidence.id },
+        });
+        ensureOpenTask(state, now, {
+          caseId: resolution.id,
+          title: "Waiting for supplier reuse permission.",
+          context: "SOURCE recognised previously supplied evidence as potentially relevant. Recognition is not permission.",
+          recommendedAction: "The supplier must allow reuse for this request, or provide new evidence.",
+          ownerLabel: "Supplier",
+          kind: "reuse",
+        });
+        if (!command.planOnly) sendRequest(state, resolution.id, now, emit);
+        return done(state, state.events.filter((e) => e.caseId === resolution.id || e.type === "requirement.created"), resolution.id);
+      }
+    }
   }
 
   if (plan.strategy === "existing_evidence" || plan.strategy === "internal_document_candidate") {
@@ -626,6 +734,14 @@ function sendRequest(
     });
     return;
   }
+  if (plan.strategy === "same_org_reuse" && plan.candidateEvidenceId && plan.candidateClaimId) {
+    const sourceClaim = state.claims.find((c) => c.id === plan.candidateClaimId);
+    const evidence = state.evidence.find((e) => e.id === plan.candidateEvidenceId);
+    if (sourceClaim && evidence) {
+      applyExistingEvidenceToCase(state, resolution, evidence, sourceClaim, now, emit, "SAME_TENANT_REUSE");
+    }
+    if (resolution.state === "READY") return;
+  }
   const actorId = resolution.currentActorId;
   if (!actorId) return;
   const contacts = state.contacts.filter((c) => c.actorId === actorId);
@@ -663,11 +779,19 @@ function sendRequest(
   resolution.nextAction = "Automatic reminder";
   resolution.nextActionAt = addDays(now, 3);
   resolution.version += 1;
-  fail(state, resolution, "NO_RESPONSE", now, {
-    nextAction: "Automatic reminder",
-    nextActionAt: addDays(now, 3),
-    ownerLabel: resolution.ownerLabel ?? "Procurement",
-  });
+  const pendingReuse = state.reuseConsents.find((row) => row.caseId === caseId && row.status === "PENDING");
+  if (pendingReuse) {
+    const copy = explainException("REUSE_CONSENT_REQUIRED");
+    resolution.blockingReason = "REUSE_CONSENT_REQUIRED";
+    resolution.blockingExplanation = copy.reason;
+    resolution.nextAction = copy.nextAction;
+  } else {
+    fail(state, resolution, "NO_RESPONSE", now, {
+      nextAction: "Automatic reminder",
+      nextActionAt: addDays(now, 3),
+      ownerLabel: resolution.ownerLabel ?? "Procurement",
+    });
+  }
   emit({
     type: "request.sent",
     caseId,
@@ -1133,66 +1257,485 @@ function decline(
   });
 }
 
+function acceptEvidenceDisclosure(
+  state: EngineState,
+  command: Extract<Command, { type: "ACCEPT_EVIDENCE_DISCLOSURE" }>,
+  now: Date,
+  emit: (e: Omit<AuditEvent, "id">) => void
+) {
+  if (command.authorityConfirmed !== true) {
+    throw new EngineValidationError(
+      "AUTHORITY_NOT_CONFIRMED",
+      "Confirm that you are authorised to provide this information before continuing."
+    );
+  }
+  if (command.termsAccepted !== true) {
+    throw new EngineValidationError(
+      "TERMS_NOT_ACCEPTED",
+      "Read and accept the Data Disclosure Terms before continuing."
+    );
+  }
+  const current = currentDataDisclosureTerms();
+  if (command.agreementId !== current.agreementId || command.agreementVersion !== current.version) {
+    throw new EngineValidationError(
+      "TERMS_VERSION_MISMATCH",
+      "The Data Disclosure Terms shown on this request have changed. Review the current terms."
+    );
+  }
+  const terms = dataDisclosureTermsByVersion(command.agreementVersion);
+  if (!terms || terms.hash !== current.hash) {
+    throw new EngineValidationError("TERMS_VERSION_MISMATCH", "Unknown Data Disclosure Terms version.");
+  }
+
+  const resolution = caseById(state, command.caseId);
+  const requirement = requirementOf(state, resolution);
+  const supplierId = resolution.currentActorId;
+  const existing = state.disclosureAcceptances.find((row) => {
+    if (!row.authorityConfirmed || !row.termsAccepted || row.agreementVersion !== terms.version) return false;
+    if (command.portalGrantId) return row.grantId === command.portalGrantId;
+    return row.supplierId === supplierId && row.requestingOrganisationId === state.tenant.id;
+  });
+  if (existing) {
+    emit({
+      type: "disclosure.acceptance_replayed",
+      caseId: command.caseId,
+      actor: command.acceptedBy ?? supplierId ?? "supplier",
+      timestamp: iso(now),
+      detail: `Existing acceptance ${existing.agreementVersion} reused. Historical record was not changed.`,
+      payload: { acceptanceId: existing.id, agreementVersion: existing.agreementVersion },
+    });
+    return;
+  }
+
+  const scopeCaseIds = uniqueIds([
+    command.caseId,
+    ...state.cases
+      .filter((item) => item.currentActorId && item.currentActorId === supplierId)
+      .map((item) => item.id),
+  ]);
+  const scopeProductIds = uniqueIds(
+    state.requirements
+      .filter((item) => scopeCaseIds.includes(item.linkedCaseId ?? ""))
+      .flatMap((item) => item.productIds)
+  );
+  const acceptedBy = command.acceptedBy ?? supplierId ?? "supplier";
+  const record: DisclosureAgreementAcceptance = {
+    id: id(state, "acc"),
+    grantId: command.portalGrantId,
+    requestId: command.portalGrantId ?? resolution.requestId,
+    supplierId,
+    requestingOrganisationId: state.tenant.id,
+    purpose: requirement.purpose,
+    scopeCaseIds,
+    scopeProductIds,
+    agreementId: terms.agreementId,
+    agreementVersion: terms.version,
+    termsHash: terms.hash,
+    authorityConfirmed: true,
+    authorityConfirmedAt: iso(now),
+    authorityConfirmedBy: acceptedBy,
+    termsAccepted: true,
+    acceptedAt: iso(now),
+    acceptedBy,
+    reusePolicy: command.reusePolicy ?? "NO_REUSE",
+    createdAt: iso(now),
+  };
+  state.disclosureAcceptances.push(record);
+  emit({
+    type: "authority.confirmed",
+    caseId: command.caseId,
+    actor: acceptedBy,
+    timestamp: iso(now),
+    detail: "Supplier confirmed they are authorised to provide this information.",
+    payload: {
+      acceptanceId: record.id,
+      supplierId: record.supplierId ?? "",
+      requestingOrganisationId: record.requestingOrganisationId,
+    },
+  });
+  emit({
+    type: "disclosure.terms_accepted",
+    caseId: command.caseId,
+    actor: acceptedBy,
+    timestamp: iso(now),
+    detail: `Data Disclosure Terms ${terms.version} accepted.`,
+    payload: {
+      acceptanceId: record.id,
+      agreementId: terms.agreementId,
+      agreementVersion: terms.version,
+      termsHash: terms.hash,
+      purpose: record.purpose,
+      reusePolicy: record.reusePolicy,
+    },
+  });
+}
+
+function matchingDisclosureAcceptance(
+  state: EngineState,
+  command: Extract<Command, { type: "SUBMIT_RESPONSE" }>,
+  caseIds: string[]
+): DisclosureAgreementAcceptance {
+  const current = currentDataDisclosureTerms();
+  const resolution = caseById(state, command.caseId);
+  let acceptance = command.disclosureAcceptanceId
+    ? state.disclosureAcceptances.find((row) => row.id === command.disclosureAcceptanceId)
+    : undefined;
+  if (!acceptance && command.portalGrantId) {
+    acceptance = state.disclosureAcceptances.find(
+      (row) =>
+        row.grantId === command.portalGrantId &&
+        row.agreementVersion === current.version &&
+        row.authorityConfirmed &&
+        row.termsAccepted
+    );
+  }
+  if (!acceptance) {
+    acceptance = state.disclosureAcceptances.find(
+      (row) =>
+        row.supplierId === resolution.currentActorId &&
+        row.requestingOrganisationId === state.tenant.id &&
+        row.agreementVersion === current.version &&
+        row.authorityConfirmed &&
+        row.termsAccepted
+    );
+  }
+  if (!acceptance || !acceptance.authorityConfirmed || !acceptance.termsAccepted) {
+    const priorForGrant = command.portalGrantId
+      ? state.disclosureAcceptances.some(
+          (row) => row.grantId === command.portalGrantId && row.authorityConfirmed && row.termsAccepted
+        )
+      : state.disclosureAcceptances.some(
+          (row) =>
+            row.supplierId === resolution.currentActorId &&
+            row.requestingOrganisationId === state.tenant.id &&
+            row.authorityConfirmed &&
+            row.termsAccepted
+        );
+    throw new EngineValidationError(
+      priorForGrant ? "TERMS_VERSION_MISMATCH" : "DISCLOSURE_NOT_ACCEPTED",
+      priorForGrant
+        ? "The Data Disclosure Terms have been updated. Review and accept the current version."
+        : "Confirm authorisation and accept the Data Disclosure Terms before submitting evidence."
+    );
+  }
+  if (acceptance.agreementVersion !== current.version) {
+    throw new EngineValidationError(
+      "TERMS_VERSION_MISMATCH",
+      "The Data Disclosure Terms have been updated. Review and accept the current version."
+    );
+  }
+  if (acceptance.requestingOrganisationId !== state.tenant.id) {
+    throw new EngineValidationError("SCOPE_FORGERY", "This acceptance does not belong to this request.");
+  }
+  for (const caseId of caseIds) {
+    if (!acceptance.scopeCaseIds.includes(caseId)) {
+      throw new EngineValidationError(
+        "SCOPE_FORGERY",
+        "Evidence can only be submitted for the request scope that was accepted."
+      );
+    }
+  }
+  return acceptance;
+}
+
+function uniqueIds(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
+}
+
 function submitResponse(
   state: EngineState,
   command: Extract<Command, { type: "SUBMIT_RESPONSE" }>,
   now: Date,
   emit: (e: Omit<AuditEvent, "id">) => void
 ) {
-  const resolution = caseById(state, command.caseId);
-  const requirement = requirementOf(state, resolution);
-  const request = state.requests.find((r) => r.id === resolution.requestId);
+  const targetCaseIds = uniqueIds([command.caseId, ...(command.supportsCaseIds ?? [])]);
+  const disclosureV1 = Boolean(command.evidenceRoute);
+  const acceptance = disclosureV1 ? matchingDisclosureAcceptance(state, command, targetCaseIds) : undefined;
+  const reusePolicy = disclosureV1
+    ? (command.reusePolicy ?? defaultEvidenceReusePolicy(acceptance?.reusePolicy))
+    : command.reusePolicy;
+  if (reusePolicy !== undefined) command = { ...command, reusePolicy };
+
+  if (disclosureV1) {
+    if (reusePolicy && !isSupportedReusePolicy(reusePolicy)) {
+      throw new EngineValidationError("REUSE_POLICY_UNSUPPORTED", "That reuse choice is not supported.");
+    }
+    if (reusePolicy && acceptance && reuseRank(reusePolicy) > reuseRank(acceptance.reusePolicy)) {
+      throw new EngineValidationError(
+        "REUSE_NOT_PERMITTED",
+        "Reuse cannot exceed the policy accepted with the Data Disclosure Terms."
+      );
+    }
+    if (
+      (command.evidenceRoute === "CANNOT_PROVIDE" || command.disclosureMode === "CANNOT_DISCLOSE") &&
+      command.evidenceRoute !== "CANNOT_PROVIDE"
+    ) {
+      throw new EngineValidationError(
+        "DISCLOSURE_ROUTE_MISMATCH",
+        "Cannot-disclose applies only when evidence is not supplied."
+      );
+    }
+    if (command.evidenceRoute === "CANNOT_PROVIDE" || command.disclosureMode === "CANNOT_DISCLOSE") {
+      for (const caseId of targetCaseIds) {
+        recordCannotProvide(state, { ...command, caseId }, acceptance!, now, emit);
+      }
+      return;
+    }
+    if (!command.disclosureMode) {
+      throw new EngineValidationError("DISCLOSURE_MODE_REQUIRED", "Choose how this evidence may be disclosed.");
+    }
+    if (documentaryRoute(command.evidenceRoute) && !command.evidence) {
+      throw new EngineValidationError(
+        "EVIDENCE_FILE_REQUIRED",
+        "Upload original or alternative documentary evidence for this route."
+      );
+    }
+    if (command.evidenceRoute === "SUPPLIER_ATTESTATION") {
+      const attestation = command.attestation;
+      if (
+        !attestation?.legalEntity?.trim() ||
+        !attestation.personName?.trim() ||
+        !attestation.role?.trim() ||
+        !attestation.statement?.trim()
+      ) {
+        throw new EngineValidationError(
+          "ATTESTATION_INCOMPLETE",
+          "An authorised declaration must name the organisation, person, role and statement."
+        );
+      }
+    }
+  }
+
+  const primary = caseById(state, command.caseId);
+  const request = state.requests.find((r) => r.id === primary.requestId);
   if (request) {
     request.status = "SUBMITTED";
     request.lastActivityAt = iso(now);
   }
-  resolution.state = "RESPONSE_RECEIVED";
 
   let evidence: EvidenceRecord | undefined;
-  if (command.evidence) {
-    const existing = command.evidence.storageObjectId
-      ? state.evidence.find((item) => item.storageObjectId === command.evidence?.storageObjectId)
-      : undefined;
-    evidence = existing ?? {
+  if (command.evidence || command.evidenceRoute === "SUPPLIER_ATTESTATION") {
+    evidence = upsertEvidenceRecord(state, command, primary, acceptance, now, emit);
+  }
+
+  for (const caseId of targetCaseIds) {
+    const perCase =
+      caseId === command.caseId
+        ? command
+        : { ...command, caseId, value: valueForLinkedCase(state, command, caseId) };
+    applySubmittedEvidenceToCase(state, perCase, evidence, now, emit, Boolean(disclosureV1));
+    refreshReadinessCache(state, caseId);
+  }
+}
+
+function valueForLinkedCase(
+  state: EngineState,
+  command: Extract<Command, { type: "SUBMIT_RESPONSE" }>,
+  caseId: string
+): string {
+  const primary = requirementOf(state, caseById(state, command.caseId));
+  const linked = requirementOf(state, caseById(state, caseId));
+  if (primary.propertyId === linked.propertyId) return command.value;
+  return "";
+}
+
+function upsertEvidenceRecord(
+  state: EngineState,
+  command: Extract<Command, { type: "SUBMIT_RESPONSE" }>,
+  resolution: ResolutionCase,
+  acceptance: DisclosureAgreementAcceptance | undefined,
+  now: Date,
+  emit: (e: Omit<AuditEvent, "id">) => void
+): EvidenceRecord {
+  const requirement = requirementOf(state, resolution);
+  const existing = command.evidence?.storageObjectId
+    ? state.evidence.find((item) => item.storageObjectId === command.evidence?.storageObjectId)
+    : undefined;
+  const disclosureMode = command.disclosureMode;
+  const visibility = disclosureMode
+    ? mapDisclosureModeToEvidenceVisibility(disclosureMode)
+    : command.visibility === "verification_only"
+      ? "protected"
+      : "private";
+  const filename =
+    command.evidence?.filename ??
+    (command.evidenceRoute === "SUPPLIER_ATTESTATION" ? "Authorised supplier declaration" : "evidence");
+  const malformed = Boolean(
+    command.evidenceRoute &&
+      documentaryRoute(command.evidenceRoute) &&
+      command.evidence &&
+      !command.evidence.extractedValue &&
+      !command.value?.trim() &&
+      !command.evidence.sha256 &&
+      !command.evidence.storageObjectId
+  );
+  const classification = command.evidenceRoute
+    ? classifyEvidenceStrength({
+        route: command.evidenceRoute,
+        hasFile: Boolean(command.evidence?.filename || command.evidence?.storageObjectId),
+        issuerClass: command.issuerClass,
+        malformed,
+      })
+    : undefined;
+
+  const evidence =
+    existing ??
+    ({
       id: id(state, "ev"),
-      filename: command.evidence.filename,
-      sha256: command.evidence.sha256 ?? `sha-${state.seq}`,
+      filename,
+      sha256: command.evidence?.sha256 ?? `sha-${state.seq}`,
       issuer: state.actors.find((a) => a.id === resolution.currentActorId)?.name ?? "Supplier",
       ownerActorId: resolution.currentActorId ?? "unknown",
       validUntil: addDays(now, 400),
       expired: false,
-      scope: command.evidence.scope ?? { kind: "product", id: requirement.subjectId, label: requirement.subjectLabel },
-      visibility: command.visibility === "verification_only" ? "protected" : "private",
+      scope: command.evidence?.scope ?? { kind: "product", id: requirement.subjectId, label: requirement.subjectLabel },
+      visibility,
       linkedClaimIds: [],
-      extractedValue: command.evidence.extractedValue,
-      extractionConfidence: command.evidence.confidence,
-      storageObjectId: command.evidence.storageObjectId,
-      mimeType: command.evidence.mimeType,
-      sizeBytes: command.evidence.sizeBytes,
-      availability: command.evidence.availability ?? (command.evidence.storageObjectId ? "AVAILABLE" : undefined),
-      supersedesEvidenceId: command.evidence.supersedesEvidenceId,
-    };
-    if (existing) {
-      if (command.evidence.scope) existing.scope = command.evidence.scope;
-      if (command.evidence.extractedValue) existing.extractedValue = command.evidence.extractedValue;
-      if (command.evidence.confidence !== undefined) existing.extractionConfidence = command.evidence.confidence;
+      extractedValue: command.evidence?.extractedValue,
+      extractionConfidence: command.evidence?.confidence,
+      storageObjectId: command.evidence?.storageObjectId,
+      mimeType: command.evidence?.mimeType,
+      sizeBytes: command.evidence?.sizeBytes,
+      availability:
+        command.evidence?.availability ??
+        (command.evidence?.storageObjectId || command.evidenceRoute === "SUPPLIER_ATTESTATION" ? "AVAILABLE" : undefined),
+      supersedesEvidenceId: command.evidence?.supersedesEvidenceId,
+      uploadedViaPortalGrantId: command.portalGrantId,
+      createdAt: iso(now),
+      route: command.evidenceRoute,
+      disclosureMode,
+      reusePolicy: command.reusePolicy ?? (command.evidenceRoute ? "ASK_FOR_REUSE" : undefined),
+      disclosureAcceptanceId: acceptance?.id,
+      agreementVersion: acceptance?.agreementVersion,
+      issuerClass: command.issuerClass,
+      attestation: command.attestation,
+      strengthReason: classification?.reason,
+    } satisfies EvidenceRecord);
+
+  if (existing) {
+    if (command.evidence?.scope) existing.scope = command.evidence.scope;
+    if (command.evidence?.extractedValue) existing.extractedValue = command.evidence.extractedValue;
+    if (command.evidence?.confidence !== undefined) existing.extractionConfidence = command.evidence.confidence;
+    if (command.evidenceRoute && !existing.route) existing.route = command.evidenceRoute;
+    if (disclosureMode && !existing.disclosureMode) existing.disclosureMode = disclosureMode;
+    if (acceptance && !existing.disclosureAcceptanceId) {
+      existing.disclosureAcceptanceId = acceptance.id;
+      existing.agreementVersion = acceptance.agreementVersion;
     }
-    if (!existing) {
-      if (command.evidence.supersedesEvidenceId) {
-        const previous = state.evidence.find((item) => item.id === command.evidence?.supersedesEvidenceId);
-        if (previous) previous.supersededByEvidenceId = evidence.id;
-      }
-      state.evidence.push(evidence);
+  } else {
+    if (command.evidence?.supersedesEvidenceId) {
+      const previous = state.evidence.find((item) => item.id === command.evidence?.supersedesEvidenceId);
+      if (previous) previous.supersededByEvidenceId = evidence.id;
     }
-    emit({
-      type: "evidence.uploaded",
-      caseId: command.caseId,
-      actor: resolution.currentActorId ?? "supplier",
-      timestamp: iso(now),
-      detail: evidence.filename,
-    });
+    state.evidence.push(evidence);
   }
 
+  emit({
+    type: command.evidenceRoute === "SUPPLIER_ATTESTATION" ? "evidence.attestation_submitted" : "evidence.uploaded",
+    caseId: command.caseId,
+    actor: resolution.currentActorId ?? "supplier",
+    timestamp: iso(now),
+    detail: evidence.filename,
+    payload: {
+      evidenceId: evidence.id,
+      route: command.evidenceRoute ?? "",
+      disclosureMode: disclosureMode ?? "",
+      reusePolicy: evidence.reusePolicy ?? "",
+      agreementVersion: evidence.agreementVersion ?? "",
+    },
+  });
+  return evidence;
+}
+
+function recordCannotProvide(
+  state: EngineState,
+  command: Extract<Command, { type: "SUBMIT_RESPONSE" }>,
+  acceptance: DisclosureAgreementAcceptance,
+  now: Date,
+  emit: (e: Omit<AuditEvent, "id">) => void
+) {
+  const resolution = caseById(state, command.caseId);
+  const requirement = requirementOf(state, resolution);
+  const reason = command.cannotProvideReason ?? "other";
+  state.cannotProvideResponses.push({
+    id: id(state, "cnp"),
+    caseId: command.caseId,
+    grantId: command.portalGrantId,
+    reason,
+    note: command.value || undefined,
+    disclosureAcceptanceId: acceptance.id,
+    createdAt: iso(now),
+    createdBy: resolution.currentActorId ?? "supplier",
+  });
+  const request = state.requests.find((r) => r.id === resolution.requestId);
+  if (request) {
+    request.status = reason === "another_party" ? "NEEDS_UPSTREAM" : "UNKNOWN_INFORMATION";
+    request.lastActivityAt = iso(now);
+  }
+  const blocking: ExceptionCode =
+    reason === "confidentiality" || reason === "commercially_sensitive"
+      ? "CONFIDENTIAL"
+      : reason === "another_party"
+        ? "UPSTREAM_REQUIRED"
+        : reason === "unavailable"
+          ? "DECLINED"
+          : "UNKNOWN";
+  fail(state, resolution, blocking, now, {
+    state: reason === "another_party" ? "WAITING_UPSTREAM" : "REVIEW_ROUTING",
+    nextAction:
+      reason === "another_party"
+        ? "Identify the party that holds this evidence, or keep the case open."
+        : "Supplier could not provide evidence. Choose an alternative route or keep this as Needs You.",
+    ownerLabel: "Tenant owner",
+  });
+  state.tasks.push({
+    id: id(state, "task"),
+    caseId: command.caseId,
+    title: "Supplier could not provide this evidence.",
+    context: `Reason: ${reason.replaceAll("_", " ")}.`,
+    recommendedAction: "Do not mark ready. Try another actor, an alternative evidence route, or keep the gap visible.",
+    ownerLabel: "Tenant owner",
+    status: "open",
+    createdAt: iso(now),
+    kind: "review",
+  });
+  recordAssessment(state, {
+    caseId: command.caseId,
+    requirementId: requirement.id,
+    result: "INSUFFICIENT",
+    reason: "The supplier could not provide evidence. The requirement stays open.",
+    assessedAt: iso(now),
+  });
+  emit({
+    type: "evidence.cannot_provide",
+    caseId: command.caseId,
+    actor: resolution.currentActorId ?? "supplier",
+    timestamp: iso(now),
+    detail: `Cannot provide: ${reason}.`,
+    payload: {
+      reason,
+      disclosureMode: "CANNOT_DISCLOSE",
+      agreementVersion: acceptance.agreementVersion,
+    },
+  });
+}
+
+function applySubmittedEvidenceToCase(
+  state: EngineState,
+  command: Extract<Command, { type: "SUBMIT_RESPONSE" }>,
+  evidence: EvidenceRecord | undefined,
+  now: Date,
+  emit: (e: Omit<AuditEvent, "id">) => void,
+  disclosureV1: boolean
+) {
+  const resolution = caseById(state, command.caseId);
+  const requirement = requirementOf(state, resolution);
+  if (evidence && evidence.linkedClaimIds.some((claimId) => state.claims.find((c) => c.id === claimId)?.caseId === command.caseId)) {
+    return;
+  }
+  resolution.state = "RESPONSE_RECEIVED";
+
+  const differentPropertyLinked = disclosureV1 && !command.value?.trim();
   const extracted = evidence?.extractedValue;
   if (extracted && command.value && extracted !== command.value) {
     const claim = writeClaim(state, resolution, requirement, command, evidence, now, "DECLARED");
@@ -1221,6 +1764,16 @@ function submitResponse(
       createdAt: iso(now),
       kind: "conflict",
     });
+    recordAssessment(state, {
+      caseId: command.caseId,
+      requirementId: requirement.id,
+      evidenceId: evidence?.id,
+      claimId: claim.id,
+      result: "CONFLICTING",
+      evidenceStrength: "DECLARED",
+      reason: "Declared value and documentary extract disagree.",
+      assessedAt: iso(now),
+    });
     emit({
       type: "claim.conflict_detected",
       caseId: command.caseId,
@@ -1232,34 +1785,108 @@ function submitResponse(
   }
 
   if (evidence && (evidence.extractionConfidence ?? 100) < 80) {
-    writeClaim(state, resolution, requirement, command, evidence, now, "DECLARED");
+    const claim = writeClaim(state, resolution, requirement, command, evidence, now, "DECLARED");
     fail(state, resolution, "EXTRACTION_REVIEW_REQUIRED", now, {
       state: "VALIDATING",
       nextAction: "Review the extracted candidate. We may have found this information.",
     });
+    recordAssessment(state, {
+      caseId: command.caseId,
+      requirementId: requirement.id,
+      evidenceId: evidence.id,
+      claimId: claim.id,
+      result: "REVIEW_REQUIRED",
+      evidenceStrength: "DECLARED",
+      reason: "Extraction confidence is too low to treat as sufficient.",
+      assessedAt: iso(now),
+    });
     return;
   }
 
-  const scopeMatch = evidenceScopeApplies(evidence, requirement.subjectId);
+  const linkedBySupplier = (command.supportsCaseIds ?? []).includes(command.caseId);
+  const scopeMatch = linkedBySupplier || evidenceScopeApplies(evidence, requirement.subjectId);
   if (evidence && !scopeMatch) {
-    writeClaim(state, resolution, requirement, command, evidence, now, "DECLARED");
+    const claim = writeClaim(state, resolution, requirement, command, evidence, now, "DECLARED");
     fail(state, resolution, "SCOPE_MISMATCH", now, {
       state: "VALIDATING",
       nextAction: "Evidence is not in scope for this product. Do not promote to verified.",
     });
+    recordAssessment(state, {
+      caseId: command.caseId,
+      requirementId: requirement.id,
+      evidenceId: evidence.id,
+      claimId: claim.id,
+      result: "INSUFFICIENT",
+      evidenceStrength: "DECLARED",
+      reason: "Strong or documentary evidence may still be irrelevant to this requirement.",
+      assessedAt: iso(now),
+    });
     return;
   }
 
-  const trust = evidence ? "EVIDENCED" : "DECLARED";
+  let trust: ClaimRecord["trustLevel"] = evidence ? "EVIDENCED" : "DECLARED";
+  if (disclosureV1) {
+    const classified = classifyEvidenceStrength({
+      route: command.evidenceRoute,
+      hasFile: Boolean(evidence && evidence.route !== "SUPPLIER_ATTESTATION" && (evidence.storageObjectId || evidence.filename)),
+      issuerClass: command.issuerClass ?? evidence?.issuerClass,
+      relevant: scopeMatch,
+      malformed:
+        documentaryRoute(command.evidenceRoute) &&
+        Boolean(evidence) &&
+        !evidence?.extractedValue &&
+        !command.value?.trim() &&
+        !evidence?.storageObjectId,
+    });
+    trust = classified.trustLevel;
+    if (evidence) evidence.strengthReason = classified.reason;
+  }
+
+  if (differentPropertyLinked && disclosureV1) {
+    const claim = writeClaim(state, resolution, requirement, { ...command, value: command.value || "see evidence" }, evidence, now, trust);
+    writePermission(state, claim, command, now);
+    fail(state, resolution, "EXTRACTION_REVIEW_REQUIRED", now, {
+      state: "VALIDATING",
+      nextAction: "Documentary evidence is linked. Review whether it supports this requirement.",
+    });
+    recordAssessment(state, {
+      caseId: command.caseId,
+      requirementId: requirement.id,
+      evidenceId: evidence?.id,
+      claimId: claim.id,
+      result: "REVIEW_REQUIRED",
+      evidenceStrength: trust,
+      reason: "The same evidence is linked to another requirement and needs a sufficiency review.",
+      assessedAt: iso(now),
+    });
+    return;
+  }
+
   const claim = writeClaim(state, resolution, requirement, command, evidence, now, trust);
   const permission = writePermission(state, claim, command, now);
 
-  if (requirement.requiredTrustLevel !== "DECLARED" && !evidence) {
+  if (requirement.requiredTrustLevel !== "DECLARED" && (!evidence || trust === "DECLARED")) {
     resolution.state = "EVIDENCE_REQUIRED";
     fail(state, resolution, "EVIDENCE_MISSING", now, {
-      nextAction: "Ask for a document. Declared is not enough for this dataset.",
+      nextAction:
+        command.evidenceRoute === "SUPPLIER_ATTESTATION"
+          ? "Attestation received, but documentary evidence is still required."
+          : "Ask for a document. Declared is not enough for this dataset.",
     });
     claim.ready = false;
+    recordAssessment(state, {
+      caseId: command.caseId,
+      requirementId: requirement.id,
+      evidenceId: evidence?.id,
+      claimId: claim.id,
+      result: "INSUFFICIENT",
+      evidenceStrength: trust,
+      reason:
+        command.evidenceRoute === "SUPPLIER_ATTESTATION"
+          ? "Attestation received, but documentary evidence is still required."
+          : "A value was declared without sufficient evidence.",
+      assessedAt: iso(now),
+    });
     return;
   }
 
@@ -1312,10 +1939,272 @@ function submitResponse(
       fail(state, resolution, report.blockingReason ?? "UNRESOLVABLE", now, { state: "VALIDATING" });
     }
     claim.ready = false;
+    const assessed = assessRequirementSufficiency({
+      caseState: resolution.state,
+      claimReady: false,
+      trustLevel: claim.trustLevel,
+      requiredTrustLevel: requirement.requiredTrustLevel,
+      conflict: false,
+      reviewRequired:
+        report.blockingReason !== "AUTHORIZATION_REQUIRED" &&
+        report.blockingReason !== "PERMISSION_DENIED" &&
+        command.permission !== "REQUEST_REQUIRED",
+      route: command.evidenceRoute,
+    });
+    recordAssessment(state, {
+      caseId: command.caseId,
+      requirementId: requirement.id,
+      evidenceId: evidence?.id,
+      claimId: claim.id,
+      result: assessed.result,
+      evidenceStrength: claim.trustLevel,
+      reason: assessed.reason,
+      assessedAt: iso(now),
+    });
     return;
   }
 
   markReady(state, resolution, claim, now, emit, "Supplier provided value, evidence and permission.", "SUPPLIER_RESPONSE");
+  const assessed = assessRequirementSufficiency({
+    caseState: resolution.state,
+    claimReady: true,
+    trustLevel: claim.trustLevel,
+    requiredTrustLevel: requirement.requiredTrustLevel,
+    conflict: false,
+    reviewRequired: false,
+    route: command.evidenceRoute,
+  });
+  recordAssessment(state, {
+    caseId: command.caseId,
+    requirementId: requirement.id,
+    evidenceId: evidence?.id,
+    claimId: claim.id,
+    result: assessed.result,
+    evidenceStrength: claim.trustLevel,
+    reason: assessed.reason,
+    assessedAt: iso(now),
+  });
+}
+
+function upsertReuseConsent(
+  state: EngineState,
+  resolution: ResolutionCase,
+  evidence: EvidenceRecord,
+  sourceClaim: ClaimRecord,
+  now: Date,
+  emit: (e: Omit<AuditEvent, "id">) => void
+): EvidenceReuseConsent {
+  const requirement = requirementOf(state, resolution);
+  const key = reuseConsentKey({
+    evidenceId: evidence.id,
+    caseId: resolution.id,
+    requirementId: requirement.id,
+    organisationId: state.tenant.id,
+    purpose: requirement.purpose,
+  });
+  const existing = state.reuseConsents.find((row) => row.key === key);
+  if (existing) {
+    if (evidence.supersededByEvidenceId && existing.status === "PENDING") {
+      existing.status = "SUPERSEDED";
+      emit({
+        type: "reuse.candidate_superseded",
+        caseId: resolution.id,
+        actor: "SOURCE_SYSTEM",
+        timestamp: iso(now),
+        detail: "The proposed evidence was superseded. This reuse request is no longer current.",
+        payload: { consentId: existing.id, evidenceId: evidence.id },
+      });
+    }
+    return existing;
+  }
+  const originalRequirement = sourceClaim.requirementId
+    ? state.requirements.find((item) => item.id === sourceClaim.requirementId)
+    : undefined;
+  const consent: EvidenceReuseConsent = {
+    id: id(state, "ruc"),
+    key,
+    evidenceId: evidence.id,
+    caseId: resolution.id,
+    requirementId: requirement.id,
+    productIds: requirement.productIds,
+    originalCaseId: sourceClaim.caseId,
+    originalRequirementId: sourceClaim.requirementId,
+    originalProductIds: originalRequirement?.productIds ?? (sourceClaim.productId ? [sourceClaim.productId] : []),
+    originalScopeLabel: originalRequirement
+      ? `${originalRequirement.subjectLabel} — ${originalRequirement.propertyLabel}`
+      : sourceClaim.productId,
+    proposedScopeLabel: `${requirement.subjectLabel} — ${requirement.propertyLabel}`,
+    requestingOrganisationId: state.tenant.id,
+    supplierId: evidence.ownerActorId,
+    purpose: requirement.purpose,
+    evidenceReusePolicy: evidence.reusePolicy ?? "ASK_FOR_REUSE",
+    disclosureMode: inheritedDisclosureMode(evidence),
+    disclosureAcceptanceId: evidence.disclosureAcceptanceId,
+    agreementVersion: evidence.agreementVersion,
+    status: "PENDING",
+    createdAt: iso(now),
+  };
+  state.reuseConsents.push(consent);
+  emit({
+    type: "reuse.candidate_created",
+    caseId: resolution.id,
+    actor: "SOURCE_SYSTEM",
+    timestamp: iso(now),
+    detail: "SOURCE recognised existing evidence as a reuse candidate. It has not been applied.",
+    payload: {
+      consentId: consent.id,
+      evidenceId: evidence.id,
+      evidenceReusePolicy: consent.evidenceReusePolicy,
+      purpose: consent.purpose,
+    },
+  });
+  return consent;
+}
+
+function decideEvidenceReuse(
+  state: EngineState,
+  command: Extract<Command, { type: "DECIDE_EVIDENCE_REUSE" }>,
+  now: Date,
+  emit: (e: Omit<AuditEvent, "id">) => void
+) {
+  const resolution = caseById(state, command.caseId);
+  const consent =
+    findReuseConsent(state, {
+      consentId: command.consentId,
+      caseId: command.caseId,
+      evidenceId: command.evidenceId,
+    }) ?? state.reuseConsents.find((row) => row.caseId === command.caseId && row.status === "PENDING");
+  if (!consent) {
+    throw new EngineValidationError("REUSE_CONSENT_NOT_FOUND", "There is no reuse request to decide for this case.");
+  }
+  if (consent.caseId !== command.caseId) {
+    throw new EngineValidationError("SCOPE_FORGERY", "That reuse request does not belong to this requirement.");
+  }
+  if (consent.supplierId !== resolution.currentActorId && consent.supplierId !== (resolution.supplierId ?? "")) {
+    throw new EngineValidationError("REUSE_CONSENT_FORBIDDEN", "Only the supplier who provided this evidence can decide reuse.");
+  }
+  if (command.decidedBy && command.decidedBy !== consent.supplierId) {
+    throw new EngineValidationError("REUSE_CONSENT_FORBIDDEN", "Only the supplier who provided this evidence can decide reuse.");
+  }
+  if (consent.requestingOrganisationId !== state.tenant.id) {
+    throw new EngineValidationError("SCOPE_FORGERY", "This reuse request does not belong to this organisation.");
+  }
+  if (consent.status === "DECLINED" && command.decision === "APPROVED") {
+    throw new EngineValidationError("REUSE_CONSENT_IMMUTABLE", "That reuse request was already declined.");
+  }
+  if (consent.status === "APPROVED" && command.decision === "DECLINED") {
+    throw new EngineValidationError("REUSE_CONSENT_IMMUTABLE", "That reuse request was already approved.");
+  }
+  const evidence = state.evidence.find((item) => item.id === consent.evidenceId);
+  const originalClaim =
+    (consent.originalCaseId
+      ? state.claims.find((item) => item.caseId === consent.originalCaseId && item.evidenceId === consent.evidenceId)
+      : undefined) ?? state.claims.find((item) => item.evidenceId === consent.evidenceId);
+  if (!evidence || !originalClaim) {
+    throw new EngineValidationError("REUSE_CONSENT_NOT_FOUND", "The proposed evidence is no longer available.");
+  }
+
+  if (consent.status === "APPROVED" && command.decision === "APPROVED") {
+    applyExistingEvidenceToCase(state, resolution, evidence, originalClaim, now, emit, "SAME_TENANT_REUSE");
+    return;
+  }
+
+  consent.status = command.decision === "APPROVED" ? "APPROVED" : "DECLINED";
+  consent.decision = command.decision;
+  consent.decidedAt = iso(now);
+  consent.decidedBy = command.decidedBy ?? command.portalGrantId ?? resolution.currentActorId ?? "supplier";
+  consent.grantId = command.portalGrantId;
+  for (const task of state.tasks) {
+    if (task.caseId === command.caseId && task.kind === "reuse" && task.status === "open") task.status = "done";
+  }
+  emit({
+    type: command.decision === "APPROVED" ? "reuse.consent_approved" : "reuse.consent_declined",
+    caseId: command.caseId,
+    actor: consent.decidedBy,
+    timestamp: iso(now),
+    detail:
+      command.decision === "APPROVED"
+        ? "Supplier authorised reuse for this request only. SOURCE will now assess sufficiency."
+        : "Supplier declined reuse. The requirement stays open for new evidence.",
+    payload: {
+      consentId: consent.id,
+      evidenceId: evidence.id,
+      decision: command.decision,
+      evidenceReusePolicy: consent.evidenceReusePolicy,
+      agreementVersion: consent.agreementVersion ?? "",
+    },
+  });
+
+  if (command.decision === "DECLINED") {
+    resolution.state = "WAITING_RESPONSE";
+    resolution.blockingReason = undefined;
+    resolution.nextAction = "Provide new evidence, alternative evidence, an authorised declaration, or say you cannot provide it.";
+    resolution.version += 1;
+    return;
+  }
+
+  applyExistingEvidenceToCase(state, resolution, evidence, originalClaim, now, emit, "SAME_TENANT_REUSE");
+}
+
+function applyExistingEvidenceToCase(
+  state: EngineState,
+  resolution: ResolutionCase,
+  evidence: EvidenceRecord,
+  sourceClaim: ClaimRecord,
+  now: Date,
+  emit: (e: Omit<AuditEvent, "id">) => void,
+  mechanism: ResolutionMechanism
+) {
+  if (state.claims.some((claim) => claim.caseId === resolution.id && claim.evidenceId === evidence.id)) {
+    return;
+  }
+  const requirement = requirementOf(state, resolution);
+  const disclosureMode = inheritedDisclosureMode(evidence);
+  const sourcePermission = state.permissions.find((item) => item.claimId === sourceClaim.id);
+  applySubmittedEvidenceToCase(
+    state,
+    {
+      type: "SUBMIT_RESPONSE",
+      caseId: resolution.id,
+      value: sourceClaim.value,
+      unit: sourceClaim.unit,
+      permission: sourcePermission?.state === "GRANTED" ? "GRANTED" : sourceClaim.permissionState,
+      visibility: sourcePermission?.visibility,
+      evidenceRoute: evidence.route,
+      disclosureMode,
+      reusePolicy: evidence.reusePolicy,
+      issuerClass: evidence.issuerClass,
+    },
+    evidence,
+    now,
+    emit,
+    Boolean(evidence.route)
+  );
+  const newClaim = state.claims.find((claim) => claim.caseId === resolution.id && claim.evidenceId === evidence.id);
+  if (newClaim) {
+    newClaim.trustLevel = sourceClaim.trustLevel;
+    const newPermission = state.permissions.find((item) => item.claimId === newClaim.id);
+    if (newPermission && sourcePermission) newPermission.visibility = sourcePermission.visibility;
+    refreshReadinessCache(state, resolution.id);
+    if (resolution.state === "READY" && !newClaim.ready) {
+      resolution.state = "EVIDENCE_REQUIRED";
+      resolution.resolutionOutcome = undefined;
+      resolution.closedAt = undefined;
+    }
+    const outcome = [...state.requirementOutcomes].reverse().find((row) => row.requirementId === requirement.id);
+    if (outcome) outcome.mechanism = mechanism;
+  }
+}
+
+function recordAssessment(
+  state: EngineState,
+  row: Omit<RequirementEvidenceAssessment, "id" | "assessedBy">
+) {
+  state.requirementAssessments.push({
+    ...row,
+    id: id(state, "ras"),
+    assessedBy: "SOURCE_SYSTEM",
+  });
 }
 
 function writeClaim(
@@ -1365,7 +2254,9 @@ function writePermission(
     granteeActorId: state.tenant.id,
     purpose: claim.purpose,
     state: command.permission,
-    visibility: command.visibility ?? "value",
+    visibility: command.disclosureMode
+      ? mapDisclosureModeToPermissionVisibility(command.disclosureMode)
+      : (command.visibility ?? "value"),
     createdAt: now.toISOString(),
   };
   state.permissions.push(grant);

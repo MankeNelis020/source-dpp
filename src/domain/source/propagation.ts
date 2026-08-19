@@ -57,6 +57,7 @@ export function claimsCompatible(args: {
 
 export function evidenceScopeApplies(evidence: EvidenceRecord | undefined, subjectId: string): boolean {
   if (!evidence) return true;
+  if (evidence.scope.kind === "company") return true;
   if (!evidence.scope.id) return false;
   return evidence.scope.id === subjectId;
 }

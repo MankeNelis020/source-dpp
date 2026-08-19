@@ -117,6 +117,12 @@ const EXCEPTIONS: Record<ExceptionCode, Omit<ExceptionExplanation, "code">> = {
     nextAction: "Ask the supplier for a one-click grant.",
     automationPolicy: "reuse_authorization",
   },
+  REUSE_CONSENT_REQUIRED: {
+    headline: "Evidence may already exist. Waiting for supplier reuse permission.",
+    reason: "SOURCE recognised previously supplied evidence as potentially relevant. Recognition is not permission.",
+    nextAction: "Ask the supplier to allow reuse for this request, or collect new evidence.",
+    automationPolicy: "reuse_consent",
+  },
   SOURCE_UNAVAILABLE: {
     headline: "The supplier is unreachable.",
     reason: "No valid contact remains, or the organisation no longer exists.",
@@ -188,12 +194,48 @@ export const CORE_LOOP = [
 ] as const;
 
 export const SUPPLIER_ACTIONS = [
-  { id: "provide", label: "Provide answer" },
-  { id: "upload", label: "Upload evidence" },
-  { id: "existing", label: "Use existing evidence" },
+  { id: "original", label: "Upload original supporting evidence", recommended: true },
+  { id: "alternative", label: "I can't provide the requested document, but I can provide alternative evidence." },
+  { id: "attest", label: "Make an authorised declaration" },
+  { id: "cannot", label: "I cannot provide or disclose this" },
   { id: "upstream", label: "Ask my supplier" },
   { id: "colleague", label: "Assign colleague" },
   { id: "unknown", label: "I don't know" },
-  { id: "decline", label: "I cannot share this" },
   { id: "wrong", label: "I'm not the right person" },
+] as const;
+
+export const SUPPLIER_DISCLOSURE_MODES = [
+  {
+    id: "SHARE_SOURCE",
+    label: "Share the original with this organisation",
+    help: "SOURCE may process the file and the requesting organisation may access the original.",
+  },
+  {
+    id: "PROTECTED_SOURCE",
+    label: "Keep the original confidential",
+    help: "SOURCE may process the file. The organisation receives relevant extracted facts and a provenance summary, not the original file.",
+  },
+  {
+    id: "VERIFICATION_ONLY",
+    label: "Verification only",
+    help: "SOURCE may check whether the requirement is supported. The organisation does not receive the original or unnecessary extracted facts.",
+  },
+] as const;
+
+export const SUPPLIER_REUSE_CHOICES = [
+  {
+    id: "ASK_FOR_REUSE",
+    label: "Ask me before reusing this evidence",
+    help: "SOURCE may recognise a possible match, but will ask you before applying it elsewhere.",
+  },
+  {
+    id: "REUSE_WITHIN_REQUESTING_ORGANISATION",
+    label: "Allow reuse for this organisation",
+    help: "SOURCE may reuse this evidence for compatible requests from this organisation without asking again.",
+  },
+  {
+    id: "NO_REUSE",
+    label: "Do not reuse this evidence",
+    help: "SOURCE will not apply this evidence to another request.",
+  },
 ] as const;

@@ -102,6 +102,7 @@ const COMMAND_CAPABILITY: Partial<Record<Command["type"], Capability>> = {
   FORWARD_UPSTREAM: "supplier:request",
   DECLINE: "case:resolve",
   SUBMIT_RESPONSE: "case:resolve",
+  ACCEPT_EVIDENCE_DISCLOSURE: "case:resolve",
   GRANT_PERMISSION: "permission:grant",
   DENY_PERMISSION: "permission:grant",
   REVOKE_PERMISSION: "permission:revoke",
@@ -122,6 +123,8 @@ const COMMAND_CAPABILITY: Partial<Record<Command["type"], Capability>> = {
 
 const PORTAL_COMMAND_MAP: Partial<Record<Command["type"], PortalCommand>> = {
   SUBMIT_RESPONSE: "SUBMIT_RESPONSE",
+  ACCEPT_EVIDENCE_DISCLOSURE: "ACCEPT_EVIDENCE_DISCLOSURE",
+  DECIDE_EVIDENCE_REUSE: "DECIDE_EVIDENCE_REUSE",
   MARK_UNKNOWN: "MARK_UNKNOWN",
   FORWARD_UPSTREAM: "FORWARD_UPSTREAM",
   ASSIGN_COLLEAGUE: "ASSIGN_COLLEAGUE",

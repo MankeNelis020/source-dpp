@@ -57,6 +57,8 @@ export async function issuePortalGrant(
       "REQUEST_CLARIFICATION",
       "MARK_UNKNOWN",
       "MARK_WRONG_CONTACT",
+      "ACCEPT_EVIDENCE_DISCLOSURE",
+      "DECIDE_EVIDENCE_REUSE",
     ] as const,
     expiresAt: input.expiresAt,
     createdAt: new Date().toISOString(),
