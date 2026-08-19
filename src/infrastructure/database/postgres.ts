@@ -963,9 +963,9 @@ export class PostgresPersistence implements PersistencePort {
       id: String(row.id),
       userId: String(row.user_id ?? row.userId),
       organisationId: String(row.organisation_id ?? row.organisationId),
-      expiresAt: requireTimestamp(row.expires_at ?? row.expiresAt as TimestampInput),
-      revokedAt: normalizeTimestamp(row.revoked_at ?? row.revokedAt as TimestampInput) ?? undefined,
-      createdAt: requireTimestamp(row.created_at ?? row.createdAt as TimestampInput),
+      expiresAt: requireTimestamp(row.expires_at ?? row.expiresAt),
+      revokedAt: normalizeTimestamp(row.revoked_at ?? row.revokedAt) ?? undefined,
+      createdAt: requireTimestamp(row.created_at ?? row.createdAt),
     };
   }
 

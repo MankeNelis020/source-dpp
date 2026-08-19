@@ -18,7 +18,7 @@ export class TimestampEncodingError extends Error {
 
 export type TimestampInput = string | Date | null | undefined;
 
-export function normalizeTimestamp(value: TimestampInput): string | null {
+export function normalizeTimestamp(value: unknown): string | null {
   if (value == null || value === "") return null;
   if (value instanceof Date) {
     if (Number.isNaN(value.getTime())) {
@@ -40,7 +40,7 @@ export function normalizeTimestamp(value: TimestampInput): string | null {
   throw new TimestampEncodingError();
 }
 
-export function requireTimestamp(value: TimestampInput): string {
+export function requireTimestamp(value: unknown): string {
   const normalized = normalizeTimestamp(value);
   if (!normalized) {
     throw new TimestampEncodingError("Timestamp is required.");

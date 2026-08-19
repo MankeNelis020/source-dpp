@@ -32,6 +32,7 @@ describe("normalizeTimestamp", () => {
     expect(() => normalizeTimestamp("not-a-timestamp")).toThrow(TimestampEncodingError);
     expect(() => normalizeTimestamp("2026-08-19")).toThrow(TimestampEncodingError);
     expect(() => normalizeTimestamp(new Date(Number.NaN))).toThrow(TimestampEncodingError);
+    expect(() => normalizeTimestamp(1724046439000)).toThrow(TimestampEncodingError);
     expect(() => requireTimestamp(undefined)).toThrow(TimestampEncodingError);
   });
 });
