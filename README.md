@@ -22,7 +22,7 @@ Open [http://localhost:3000](http://localhost:3000).
 | `/app` | no | Manufacturer workspace (demo data) |
 | `/s/demo` | no | Supplier request |
 
-Canonical public host: `https://source.eu` (override with `NEXT_PUBLIC_SITE_URL`).
+Canonical public host: `https://source-dpp.eu` (override with `NEXT_PUBLIC_SITE_URL`). `source.eu` is not available.
 
 We never say a claim is true. We show you how it's known. Knowledge pages are not legal advice.
 
@@ -30,11 +30,11 @@ We never say a claim is true. We show you how it's known. Knowledge pages are no
 
 These cannot be completed from the repo alone:
 
-1. **DNS** — apex `source.eu`, HTTPS, one host (no www duplicate, or 301 www → apex).
-2. **Google Search Console** — verify the domain. Optional env: `GOOGLE_SITE_VERIFICATION`. Submit `https://source.eu/sitemap.xml`.
-3. **Bing Webmaster Tools** — verify. Optional env: `BING_SITE_VERIFICATION`. Submit the sitemap. Enable IndexNow with `INDEXNOW_KEY` so `/indexnow-key.txt` serves the key.
+1. **DNS** — apex `source-dpp.eu`, HTTPS, one host (301 `www.source-dpp.eu` → apex if you use www). `source.eu` is taken; do not configure it.
+2. **Google Search Console** — verify **source-dpp.eu**. Optional env: `GOOGLE_SITE_VERIFICATION`. Submit `https://source-dpp.eu/sitemap.xml`.
+3. **Bing Webmaster Tools** — verify **source-dpp.eu**. Optional env: `BING_SITE_VERIFICATION`. Submit the sitemap. Enable IndexNow with `INDEXNOW_KEY` so `/indexnow-key.txt` serves the key.
 4. **IndexNow** — only after a public URL is created, substantially updated, or removed:
-   `INDEXNOW_KEY=… NEXT_PUBLIC_SITE_URL=https://source.eu node scripts/indexnow.mjs / /about`
+   `INDEXNOW_KEY=… NEXT_PUBLIC_SITE_URL=https://source-dpp.eu node scripts/indexnow.mjs / /about`
    Do not ping on every deploy.
 5. **Crawler policy** — public knowledge is allowed for Googlebot, Bingbot, OAI-SearchBot, ChatGPT-User, PerplexityBot, and GPTBot. `/app`, `/s/`, and auth are disallowed. GPTBot (training) is a deliberate allow of public pages so SOURCE can be cited; flip to disallow in `src/app/robots.ts` if that becomes undesirable.
 6. **Analytics** — set `NEXT_PUBLIC_ANALYTICS=1` to store first-party page views in `localStorage` (`source.events`). No third-party tags ship by default. Add a consent path before any cookie tracker.

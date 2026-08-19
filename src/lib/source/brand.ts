@@ -45,7 +45,7 @@ export const SOURCE_VISUAL_STYLE = {
   logoPosition: "top-left" as const,
   ctaStyle: "square" as const,
   contentAlign: "left" as const,
-  websiteUrl: "https://source.eu",
+  websiteUrl: "https://source-dpp.eu",
   wordmarkLift: "0.21em",
   minDigitalWidth: "96px",
   minPrintWidth: "22mm",

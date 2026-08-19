@@ -7,7 +7,7 @@ import { SITE_URL } from "./site";
  *
  * Env:
  *   INDEXNOW_KEY          — shared key (also served at /indexnow-key.txt)
- *   NEXT_PUBLIC_SITE_URL  — canonical host, e.g. https://source.eu
+ *   NEXT_PUBLIC_SITE_URL  — canonical host, e.g. https://source-dpp.eu
  */
 export async function submitIndexNow(urls: string[]): Promise<{ ok: boolean; status: number; body: string }> {
   const key = process.env.INDEXNOW_KEY;

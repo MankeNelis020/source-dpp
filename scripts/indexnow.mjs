@@ -2,9 +2,9 @@
 /**
  * Submit IndexNow for listed URLs. Do not run on every deploy.
  *
- *   INDEXNOW_KEY=... NEXT_PUBLIC_SITE_URL=https://source.eu node scripts/indexnow.mjs / /about
+ *   INDEXNOW_KEY=... NEXT_PUBLIC_SITE_URL=https://source-dpp.eu node scripts/indexnow.mjs / /about
  */
-const site = (process.env.NEXT_PUBLIC_SITE_URL || "https://source.eu").replace(/\/$/, "");
+const site = (process.env.NEXT_PUBLIC_SITE_URL || "https://source-dpp.eu").replace(/\/$/, "");
 const key = process.env.INDEXNOW_KEY;
 const urls = process.argv.slice(2);
 

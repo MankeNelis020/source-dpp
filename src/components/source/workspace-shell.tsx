@@ -53,7 +53,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
           <div className="text-[13px]">{session?.organisation ?? DEMO_ORG.name}</div>
           <div className="flex items-center justify-between gap-2 pt-1">
             <Mono className="truncate text-[11px] text-ink/55">
-              {session?.email ?? "demo@source.eu"}
+              {session?.email ?? "demo@source-dpp.eu"}
             </Mono>
             {session ? (
               <button

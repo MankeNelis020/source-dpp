@@ -4,7 +4,7 @@
  */
 
 export const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || "https://source.eu";
+  process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || "https://source-dpp.eu";
 
 export const SITE_NAME = "SOURCE";
 
