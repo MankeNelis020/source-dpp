@@ -38,7 +38,11 @@ interface ImportJob {
     productSupplierRelationships?: number;
     requirements: number;
     autoResolvable: number;
+    supplierAction?: number;
+    userAction?: number;
+    reviewOrBlocked?: number;
     needsAttention: number;
+    sourceHasExecutablePlan?: boolean;
   };
 }
 
@@ -168,28 +172,46 @@ export default function ImportWizardPage() {
             component relationships
           </p>
           <p className="mt-4 text-[14.5px]">
-            SOURCE found {job.summary.requirements} missing information requirements. We can handle {job.summary.autoResolvable} automatically. {job.summary.needsAttention} need your attention or supplier input.
+            SOURCE found {job.summary.requirements} missing information requirements. We can handle{" "}
+            {job.summary.autoResolvable} automatically. {job.summary.supplierAction ?? 0} need supplier input.{" "}
+            {job.summary.userAction ?? 0} need your attention. {job.summary.reviewOrBlocked ?? 0} need review.
           </p>
+          {job.summary.requirements >
+          job.summary.autoResolvable +
+            (job.summary.supplierAction ?? 0) +
+            (job.summary.userAction ?? 0) +
+            (job.summary.reviewOrBlocked ?? 0) ? (
+            <p className="mt-3 text-[13px] text-[#B26B2C]">
+              Some missing requirements were not classified. SOURCE will not treat them as complete.
+            </p>
+          ) : null}
           {job.errorCount ? (
             <p className="mt-3 text-[13px] text-[#B26B2C]">
               {job.errorCount} could not be imported. {job.reviewCount} need review. The original file is kept.
             </p>
           ) : null}
           <div className="mt-6 flex flex-wrap gap-2">
-            <SourceButton
-              onClick={() =>
-                void api<{ emailsQueued?: number }>("/api/source/resolution-run", { method: "POST", body: "{}" }).then((result) => {
-                  setStatus(
-                    result.emailsQueued
-                      ? "Request queued. SOURCE will email suppliers shortly."
-                      : "SOURCE is working the gaps. No new supplier email was needed."
-                  );
-                  router.push("/app/pilot");
-                })
-              }
-            >
-              Let SOURCE handle the gaps
-            </SourceButton>
+            {job.summary.sourceHasExecutablePlan !== false &&
+            job.summary.autoResolvable + (job.summary.supplierAction ?? 0) > 0 ? (
+              <SourceButton
+                onClick={() =>
+                  void api<{ emailsQueued?: number }>("/api/source/resolution-run", { method: "POST", body: "{}" }).then((result) => {
+                    setStatus(
+                      result.emailsQueued
+                        ? "Request queued. SOURCE will email suppliers shortly."
+                        : "SOURCE is working the gaps. No new supplier email was needed."
+                    );
+                    router.push("/app/pilot");
+                  })
+                }
+              >
+                Let SOURCE handle the gaps
+              </SourceButton>
+            ) : (
+              <p className="text-[13px] text-[#101A15]/70">
+                SOURCE has no executable resolution plan yet. Identify a supplier or a contact so these requirements can move.
+              </p>
+            )}
             <SourceButton href="/app/reviews" variant="ghost">
               Review {job.reviewCount || job.summary.needsAttention}
             </SourceButton>

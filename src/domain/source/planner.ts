@@ -164,7 +164,7 @@ export function planResolution(input: PlannerInput): ResolutionPlan {
 
   return {
     strategy: "human_review",
-    reason: "Confidence is too low to send. Review routing before creating supplier work.",
+    reason: "We found the missing requirement but don't yet know which supplier is responsible.",
     requiresHumanReview: true,
     expectedActions: ["human_review"],
   };

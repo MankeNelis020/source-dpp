@@ -127,6 +127,38 @@ export async function executeResolutionRun(store: PersistencePort, principal: Pr
       if (plan.strategy === "supplier_request" && resolution.currentActorId) {
         const result = applyCommand(state, { type: "SEND_REQUEST", caseId: resolution.id }, now);
         Object.assign(state, result.state);
+        continue;
+      }
+      if (plan.strategy === "alternative_contact") {
+        resolution.state = "CONTACT_REQUIRED";
+        resolution.nextAction = plan.reason;
+      } else if (plan.strategy === "explained_unresolved") {
+        resolution.state = "UNRESOLVED";
+        resolution.resolutionOutcome = "UNRESOLVED";
+        resolution.nextAction = plan.reason;
+      } else if (plan.requiresHumanReview) {
+        if (!["IDENTITY_REVIEW", "CONFLICT", "CONTACT_REQUIRED", "NDA_REQUIRED", "PERMISSION_CHECK"].includes(resolution.state)) {
+          resolution.state = "REVIEW_ROUTING";
+        }
+        resolution.nextAction = plan.reason;
+      }
+      if (
+        plan.requiresHumanReview &&
+        !state.tasks.some((t) => t.caseId === resolution.id && t.status === "open")
+      ) {
+        state.tasks.push({
+          id: `task-plan-${resolution.id}`,
+          caseId: resolution.id,
+          title: resolution.currentActorId
+            ? "This requirement still needs a person."
+            : "We don't yet know which supplier is responsible.",
+          context: plan.reason,
+          recommendedAction: "Keep this visible in Needs You until a supplier, contact, or review decision exists.",
+          ownerLabel: "Identity reviewer",
+          status: "open",
+          createdAt: now.toISOString(),
+          kind: plan.strategy === "alternative_contact" ? "contact" : "review",
+        });
       }
     }
 

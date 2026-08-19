@@ -4,6 +4,7 @@ export * from "./readiness";
 export * from "./permissions";
 export * from "./subjects";
 export * from "./planner";
+export * from "./resolution-plan";
 export * from "./propagation";
 export * from "./escalation";
 export * from "./identity";

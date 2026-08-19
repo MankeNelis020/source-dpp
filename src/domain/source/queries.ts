@@ -11,12 +11,11 @@ import { caseReadiness } from "./engine";
 const WAITING_SUPPLIER: ResolutionCaseState[] = ["WAITING_RESPONSE", "REQUEST_PENDING"];
 const NEEDS_SUPPLIER: ResolutionCaseState[] = [
   "ROUTING",
-  "REVIEW_ROUTING",
   "CONTACT_REQUIRED",
   "REQUEST_PENDING",
 ];
 const NEEDS_AUTH: ResolutionCaseState[] = ["AUTHORIZATION_REQUIRED", "PERMISSION_CHECK"];
-const NEEDS_REVIEW: ResolutionCaseState[] = ["IDENTITY_REVIEW", "VALIDATING"];
+const NEEDS_REVIEW: ResolutionCaseState[] = ["IDENTITY_REVIEW", "VALIDATING", "REVIEW_ROUTING"];
 const RESOLVED: ResolutionCaseState[] = ["READY", "RETURNED", "MONITORING"];
 
 export function matchesFilter(resolution: ResolutionCase, filter: CaseFilter): boolean {
