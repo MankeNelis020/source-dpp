@@ -8,6 +8,7 @@ import { signupAuthErrorMessage } from "@/infrastructure/auth/supabase/pkce";
 import { SourceButton } from "@/components/source/ui";
 import { AuthChrome, AuthField } from "@/components/source/auth-chrome";
 import { api } from "@/client/source/api";
+import { authEmailRedirectTo } from "@/lib/source/auth-origin";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -21,14 +22,15 @@ export default function SignupPage() {
     setPending(true);
     setError(null);
     try {
-      const config = await api<{ identityProvider: "supabase" | "test" }>("/api/auth/config");
+      const config = await api<{ identityProvider: "supabase" | "test"; appPublicUrl?: string | null }>(
+        "/api/auth/config"
+      );
       if (config.identityProvider === "supabase") {
         const supabase = createBrowserSupabaseClient();
-        const origin = window.location.origin;
         const { error: signUpError } = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: `${origin}/auth/callback?next=/onboarding/organisation` },
+          options: { emailRedirectTo: authEmailRedirectTo(config.appPublicUrl, "/onboarding/organisation") },
         });
         if (signUpError) {
           setError(signupAuthErrorMessage(signUpError));
@@ -71,6 +73,20 @@ export default function SignupPage() {
           {pending ? "Creating…" : "Create account"}
         </SourceButton>
       </form>
+      <p className="mt-4 text-[12px] leading-relaxed text-[#101A15]/55">
+        SOURCE v0.1 is a controlled invited pilot. Workspace terms and the supplier Data Disclosure
+        Terms are draft product copy and require legal review. Creating an account records operational
+        use of this environment, not a formally approved contract.
+      </p>
+      <p className="mt-3 text-center text-[13px] text-[#101A15]/60">
+        <Link href="/terms" className="underline-offset-4 hover:underline">
+          Terms
+        </Link>
+        {" · "}
+        <Link href="/privacy" className="underline-offset-4 hover:underline">
+          Privacy
+        </Link>
+      </p>
       <p className="mt-8 text-center text-[13px] text-[#101A15]/60">
         Already have an account?{" "}
         <Link href="/login" className="text-[#101A15] underline-offset-4 hover:underline">

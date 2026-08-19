@@ -122,6 +122,25 @@ async function acceptPortal(args: Awaited<ReturnType<typeof setupTenant>>, extra
 }
 
 describe("evidence disclosure enforcement", () => {
+  it("cannot submit portal evidence without an evidence route", async () => {
+    const ctx = await setupTenant();
+    await acceptPortal(ctx);
+    await expect(
+      dispatchCommand({
+        store: ctx.store,
+        principal: ctx.portal,
+        envelope: envelope(ctx.portal, {
+          type: "SUBMIT_RESPONSE",
+          caseId: ctx.caseId,
+          value: "67",
+          permission: "GRANTED",
+          evidence: { filename: "cert.pdf" },
+        }),
+        now: NOW,
+      })
+    ).rejects.toMatchObject({ code: "VALIDATION" });
+  });
+
   it("rejects portal submit without both acceptances", async () => {
     const ctx = await setupTenant();
     await expect(

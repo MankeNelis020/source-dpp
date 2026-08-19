@@ -124,6 +124,7 @@ export function loadSourceEnvironment(
     appDatabaseUrl: mode === "runtime" ? appDatabaseUrl : undefined,
     migratorDatabaseUrl,
   });
+  assertForbiddenOperationalFlags(runtime, env);
 
   if (mode === "migrator") {
     if (!migratorDatabaseUrl) {
@@ -223,6 +224,7 @@ export function loadSourceEnvironment(
         "SOURCE environment configuration mismatch: NEXT_PUBLIC_SOURCE_APP_URL is required."
       );
     }
+    assertProductionPublicUrl(runtime, appPublicUrl);
     if (!cronSecret) {
       throw new SourceEnvironmentError(
         "SOURCE environment configuration mismatch: CRON_SECRET is required."
@@ -490,6 +492,43 @@ function platformRuntime(vercelEnv: string | undefined): RuntimeEnvironment | un
   if (value === "preview") return "preview";
   if (value === "development") return "local";
   return undefined;
+}
+
+function assertProductionPublicUrl(runtime: RuntimeEnvironment, appPublicUrl: string) {
+  if (runtime !== "production") return;
+  let parsed: URL;
+  try {
+    parsed = new URL(appPublicUrl);
+  } catch {
+    throw new SourceEnvironmentError(
+      "SOURCE environment configuration mismatch: NEXT_PUBLIC_SOURCE_APP_URL must be a valid https origin."
+    );
+  }
+  if (parsed.protocol !== "https:") {
+    throw new SourceEnvironmentError(
+      "SOURCE environment configuration mismatch: production NEXT_PUBLIC_SOURCE_APP_URL must use https."
+    );
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (host === "vercel.app" || host.endsWith(".vercel.app")) {
+    throw new SourceEnvironmentError(
+      "SOURCE environment configuration mismatch: production NEXT_PUBLIC_SOURCE_APP_URL cannot be a Vercel Preview URL."
+    );
+  }
+}
+
+function assertForbiddenOperationalFlags(runtime: RuntimeEnvironment, env: EnvMap) {
+  if (runtime !== "preview" && runtime !== "production") return;
+  if (trim(env.SOURCE_DEMO_AUTH) === "1") {
+    throw new SourceEnvironmentError(
+      "SOURCE environment configuration mismatch: SOURCE_DEMO_AUTH is not allowed in preview or production."
+    );
+  }
+  if (trim(env.SOURCE_EXPOSE_INVITE_LINKS) === "1") {
+    throw new SourceEnvironmentError(
+      "SOURCE environment configuration mismatch: SOURCE_EXPOSE_INVITE_LINKS is not allowed in preview or production."
+    );
+  }
 }
 
 function assertProjectIsolation(input: {

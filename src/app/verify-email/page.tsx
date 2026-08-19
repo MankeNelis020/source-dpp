@@ -8,6 +8,7 @@ import { resendAuthErrorMessage, verifyEmailErrorMessage } from "@/infrastructur
 import { SourceButton } from "@/components/source/ui";
 import { AuthChrome } from "@/components/source/auth-chrome";
 import { api } from "@/client/source/api";
+import { authEmailRedirectTo } from "@/lib/source/auth-origin";
 
 function VerifyEmail() {
   const searchParams = useSearchParams();
@@ -20,7 +21,9 @@ function VerifyEmail() {
   async function resend() {
     setPending(true);
     try {
-      const config = await api<{ identityProvider: "supabase" | "test" }>("/api/auth/config");
+      const config = await api<{ identityProvider: "supabase" | "test"; appPublicUrl?: string | null }>(
+        "/api/auth/config"
+      );
       if (config.identityProvider !== "supabase") {
         setNotice("If this email can be used, we sent another verification link.");
         setNoticeIsError(false);
@@ -35,7 +38,7 @@ function VerifyEmail() {
       const { error: resendError } = await supabase.auth.resend({
         type: "signup",
         email,
-        options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=/onboarding/organisation` },
+        options: { emailRedirectTo: authEmailRedirectTo(config.appPublicUrl, "/onboarding/organisation") },
       });
       if (resendError) {
         setNotice(resendAuthErrorMessage(resendError));

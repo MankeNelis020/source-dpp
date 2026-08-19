@@ -1,5 +1,7 @@
 # SOURCE environments
 
+Canonical SOURCE v0.1 production operations: `docs/operations/source-v01-production.md`.
+
 SOURCE persists organisation state, imports, PilotRuns, commands, audit, outbox, and related operational state in Postgres. This is a runtime-infrastructure document. It does not describe product features.
 
 The Missing Information Engine loop is unchanged:

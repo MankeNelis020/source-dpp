@@ -338,4 +338,49 @@ describe("SOURCE environment isolation", () => {
       /production cannot use SOURCE_EMAIL_MODE=test/
     );
   });
+
+  it("fails closed when production NEXT_PUBLIC_SOURCE_APP_URL is a Vercel Preview URL", () => {
+    expectConfigError(
+      () =>
+        loadSourceEnvironment({
+          SOURCE_ENV: "production",
+          NEXT_PUBLIC_SUPABASE_URL: PRODUCTION_SUPABASE_URL,
+          SOURCE_APP_DATABASE_URL: PROD_APP_URL,
+          ...HOSTED,
+          ...PRODUCTION_EMAIL,
+          NEXT_PUBLIC_SOURCE_APP_URL: "https://source-dpp-git-main.vercel.app",
+        }),
+      /cannot be a Vercel Preview URL/
+    );
+  });
+
+  it("fails closed when production sets SOURCE_EXPOSE_INVITE_LINKS", () => {
+    expectConfigError(
+      () =>
+        loadSourceEnvironment({
+          SOURCE_ENV: "production",
+          NEXT_PUBLIC_SUPABASE_URL: PRODUCTION_SUPABASE_URL,
+          SOURCE_APP_DATABASE_URL: PROD_APP_URL,
+          SOURCE_EXPOSE_INVITE_LINKS: "1",
+          ...HOSTED,
+          ...PRODUCTION_EMAIL,
+        }),
+      /SOURCE_EXPOSE_INVITE_LINKS is not allowed/
+    );
+  });
+
+  it("fails closed when production sets SOURCE_DEMO_AUTH", () => {
+    expectConfigError(
+      () =>
+        loadSourceEnvironment({
+          SOURCE_ENV: "production",
+          NEXT_PUBLIC_SUPABASE_URL: PRODUCTION_SUPABASE_URL,
+          SOURCE_APP_DATABASE_URL: PROD_APP_URL,
+          SOURCE_DEMO_AUTH: "1",
+          ...HOSTED,
+          ...PRODUCTION_EMAIL,
+        }),
+      /SOURCE_DEMO_AUTH is not allowed/
+    );
+  });
 });

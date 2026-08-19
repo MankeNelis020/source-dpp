@@ -1,5 +1,7 @@
 # Email operations
 
+Canonical SOURCE v0.1 production operations: `docs/operations/source-v01-production.md`.
+
 This is how SOURCE sends supplier mail. DNS values must come from the Resend dashboard. Do not invent SPF/DKIM/DMARC records here.
 
 Hosted smoke test (real inbox) is blocked until Niel places Resend credentials and a verified sending domain. CI never sends live email (`TestEmailProvider`).

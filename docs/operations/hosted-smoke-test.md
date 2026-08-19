@@ -1,5 +1,7 @@
 # Hosted smoke test
 
+Canonical SOURCE v0.1 production operations: `docs/operations/source-v01-production.md`.
+
 Use this instead of ad-hoc curl against dashboards.
 
 ```bash

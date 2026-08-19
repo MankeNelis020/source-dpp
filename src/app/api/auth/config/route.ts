@@ -5,5 +5,6 @@ export async function GET() {
   return Response.json({
     identityProvider: env.identityProvider,
     invitationTtlDays: env.invitationTtlDays,
+    appPublicUrl: env.appPublicUrl ?? null,
   });
 }

@@ -20,6 +20,7 @@ import { verifyResendWebhookSignature, signResendWebhookForTests } from "@/infra
 import { renderSupplierRequestEmail } from "@/infrastructure/email/templates";
 import { createUploadIntent, putUploadBytes, finalizeUpload } from "@/server/source/uploads";
 import { createSharedMemoryObjectStorage } from "@/infrastructure/storage/memory";
+import { acceptPortalDisclosure, portalEvidenceSubmit } from "@/server/source/portal-disclosure-test";
 
 const NOW = new Date("2026-08-18T10:00:00.000Z");
 const FIXTURES = join(process.cwd(), "fixtures/p1-manufacturer");
@@ -128,6 +129,7 @@ describe("PR C communication loop", () => {
       now: NOW,
     });
     const stored = await finalizeUpload({ store, principal: portal, uploadId: intent.id, objectStorage: storage, now: NOW });
+    await acceptPortalDisclosure(store, portal, question.id, NOW);
     await dispatchCommand({
       store,
       principal: portal,
@@ -137,14 +139,10 @@ describe("PR C communication loop", () => {
         principalId: portal.grantId,
         organisationId: portal.organisationId,
         issuedAt: NOW.toISOString(),
-        command: {
-          type: "SUBMIT_RESPONSE",
-          caseId: question.id,
+        command: portalEvidenceSubmit(question.id, {
           value: "42",
-          unit: "%",
           evidence: { filename: "recycled.pdf", storageObjectId: stored.id },
-          permission: "GRANTED",
-        },
+        }),
       },
       now: NOW,
     });

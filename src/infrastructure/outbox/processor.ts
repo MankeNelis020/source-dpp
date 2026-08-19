@@ -19,6 +19,7 @@ import { renderEmailByTemplate } from "@/infrastructure/email/templates";
 import type { EmailTemplateId, OutboundMessageRecord } from "@/infrastructure/email/transport";
 import { loadSourceEnvironment } from "@/infrastructure/environment/source-environment";
 import { persistTransportFailureTask } from "@/server/source/email-events";
+import { sanitizeEmailDiagnosticMessage } from "@/infrastructure/email/email-diagnostics";
 
 export class PersistenceOutboxProcessor implements OutboxProcessor {
   constructor(private readonly store: PersistencePort) {}
@@ -57,7 +58,7 @@ export async function processOutboxBatch(args: {
       succeeded += 1;
       metricInc(METRICS.emailsProviderAccepted);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = safeOutboxErrorMessage(error);
       const retryable = isRetryableOutboxError(error);
       const attempts = row.attemptCount + 1;
       const dead = !retryable || attempts >= outboxMaxAttempts();
@@ -238,6 +239,21 @@ function replyToAddress() {
     return loadSourceEnvironment().emailReplyTo;
   } catch {
     return undefined;
+  }
+}
+
+function safeOutboxErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  try {
+    const env = loadSourceEnvironment();
+    return sanitizeEmailDiagnosticMessage(
+      message,
+      [env.resendApiKey, env.cronSecret, env.resendWebhookSecret, env.inboundWebhookSecret, env.supabaseServiceRoleKey].filter(
+        (value): value is string => Boolean(value && value.length >= 8)
+      )
+    );
+  } catch {
+    return sanitizeEmailDiagnosticMessage(message);
   }
 }
 

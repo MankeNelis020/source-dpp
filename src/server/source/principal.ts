@@ -18,7 +18,13 @@ import type { Capability } from "@/server/source/types";
 export const ACTIVE_ORG_COOKIE = "source_organisation";
 
 function orgCookieSecret(): string {
-  return process.env.SOURCE_SESSION_SECRET || "source-demo-session-secret-not-for-production";
+  const secret = process.env.SOURCE_SESSION_SECRET?.trim();
+  if (secret) return secret;
+  const runtime = process.env.SOURCE_ENV?.trim() || process.env.VERCEL_ENV?.trim();
+  if (runtime === "preview" || runtime === "production") {
+    throw new SourceError("SOURCE_UNAVAILABLE", "Session signing is not configured.", 503);
+  }
+  return "source-demo-session-secret-not-for-production";
 }
 
 export function encodeActiveOrganisation(userId: string, organisationId: string): string {

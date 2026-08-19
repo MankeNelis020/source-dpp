@@ -1,5 +1,7 @@
 # Database operations
 
+Canonical SOURCE v0.1 production operations: `docs/operations/source-v01-production.md`.
+
 Postgres is the durable source of truth. Supabase is the hosted adapter.
 
 Runtime role: **`source_app`**. Migrator/owner role is separate and is the only role that applies DDL.
