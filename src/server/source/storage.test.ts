@@ -45,6 +45,27 @@ async function provision(store: MemoryPersistence, id: string) {
 }
 
 describe("B2 durable storage", () => {
+  it("normalizes Date createdAt to ISO on save so Postgres-shaped values cannot leak", () => {
+    const store = new MemoryPersistence();
+    const created = new Date("2026-08-19T04:27:19.000Z");
+    store.saveStorageObject({
+      id: "so-date",
+      organisationId: "org-date",
+      bucket: "source-imports",
+      objectKey: "t/date",
+      purpose: "TEMPORARY_UPLOAD",
+      availability: "UPLOADING",
+      originalFilename: "products.csv",
+      scanStatus: "PENDING",
+      createdAt: created as unknown as string,
+      expiresAt: new Date("2026-08-20T04:27:19.000Z") as unknown as string,
+    });
+    const row = store.getStorageObject("so-date");
+    expect(row?.createdAt).toBe("2026-08-19T04:27:19.000Z");
+    expect(row?.expiresAt).toBe("2026-08-20T04:27:19.000Z");
+    expect(row?.createdAt).not.toBe(String(created));
+  });
+
   it("does not put SUPABASE_SERVICE_ROLE_KEY in client sources", () => {
     const roots = ["src/app", "src/components", "src/client", "src/lib"].map((dir) => join(process.cwd(), dir));
     const hits: string[] = [];
