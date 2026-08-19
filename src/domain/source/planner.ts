@@ -1,6 +1,7 @@
 import type { AttemptMethod, EngineState } from "./types";
 import { evaluateReuse } from "./reuse";
 import { findActiveDuplicate } from "./reuse";
+import { discoverReusableEvidence } from "./reuse-consent";
 import type { ReuseOutcome } from "./types";
 import type { ClaimRecord, EvidenceRecord, InformationRequirement, PermissionGrant, ResolutionCase } from "./types";
 
@@ -10,6 +11,8 @@ export interface ResolutionPlan {
     | "reusable_claim"
     | "authorization_only"
     | "cross_product_compatible"
+    | "reuse_consent_required"
+    | "same_org_reuse"
     | "existing_evidence"
     | "internal_document_candidate"
     | "active_duplicate_case"
@@ -38,6 +41,11 @@ export interface PlannerInput {
   permission?: PermissionGrant;
   duplicateCaseId?: string;
   crossProductClaim?: ClaimRecord;
+  reuseDiscovery?: {
+    evidenceId: string;
+    claimId: string;
+    mode: "auto" | "consent";
+  };
   internalDocumentId?: string;
   hasValidContact: boolean;
   now: Date;
@@ -108,6 +116,41 @@ export function planResolution(input: PlannerInput): ResolutionPlan {
       expectedActions: ["authorization"],
       candidateClaimId: input.claim.id,
       reuse,
+    };
+  }
+
+  if (reuse === "CONSENT_REQUIRED" && input.claim) {
+    return {
+      strategy: "reuse_consent_required",
+      reason: "Existing evidence may be relevant. SOURCE will ask the supplier before applying it.",
+      requiresHumanReview: false,
+      expectedActions: ["authorization"],
+      candidateClaimId: input.claim.id,
+      candidateEvidenceId: input.claim.evidenceId,
+      reuse,
+    };
+  }
+
+  if (input.reuseDiscovery?.mode === "auto") {
+    return {
+      strategy: "same_org_reuse",
+      reason: "Compatible evidence from this organisation can be reused without asking again.",
+      requiresHumanReview: false,
+      expectedActions: ["reuse"],
+      candidateClaimId: input.reuseDiscovery.claimId,
+      candidateEvidenceId: input.reuseDiscovery.evidenceId,
+    };
+  }
+
+  if (input.reuseDiscovery?.mode === "consent") {
+    return {
+      strategy: "reuse_consent_required",
+      reason: "SOURCE believes existing evidence may be relevant. The supplier must approve reuse for this request.",
+      requiresHumanReview: false,
+      expectedActions: ["authorization"],
+      candidateClaimId: input.reuseDiscovery.claimId,
+      candidateEvidenceId: input.reuseDiscovery.evidenceId,
+      reuse: "CONSENT_REQUIRED",
     };
   }
 
@@ -205,6 +248,12 @@ export function gatherPlannerInput(args: {
       relatedIds.has(c.subjectId) &&
       c.ready
   );
+  const discovered = discoverReusableEvidence({
+    state,
+    requirement,
+    supplierId: args.declaredSupplierId,
+    now,
+  });
   const contacts = args.declaredSupplierId
     ? state.contacts.filter((c) => c.actorId === args.declaredSupplierId && c.valid)
     : [];
@@ -218,6 +267,9 @@ export function gatherPlannerInput(args: {
     permission,
     duplicateCaseId: duplicate?.caseId,
     crossProductClaim,
+    reuseDiscovery: discovered
+      ? { evidenceId: discovered.evidence.id, claimId: discovered.claim.id, mode: discovered.mode }
+      : undefined,
     internalDocumentId: evidence && !claim ? evidence.id : undefined,
     hasValidContact: contacts.length > 0,
     now,

@@ -13,6 +13,7 @@ export * from "./identity";
 export * from "./routing";
 export * from "./cycles";
 export * from "./reuse";
+export * from "./reuse-consent";
 export * from "./engine";
 export * from "./queries";
 export * from "./seed";

@@ -117,6 +117,12 @@ const EXCEPTIONS: Record<ExceptionCode, Omit<ExceptionExplanation, "code">> = {
     nextAction: "Ask the supplier for a one-click grant.",
     automationPolicy: "reuse_authorization",
   },
+  REUSE_CONSENT_REQUIRED: {
+    headline: "Evidence may already exist. Waiting for supplier reuse permission.",
+    reason: "SOURCE recognised previously supplied evidence as potentially relevant. Recognition is not permission.",
+    nextAction: "Ask the supplier to allow reuse for this request, or collect new evidence.",
+    automationPolicy: "reuse_consent",
+  },
   SOURCE_UNAVAILABLE: {
     headline: "The supplier is unreachable.",
     reason: "No valid contact remains, or the organisation no longer exists.",
@@ -213,5 +219,23 @@ export const SUPPLIER_DISCLOSURE_MODES = [
     id: "VERIFICATION_ONLY",
     label: "Verification only",
     help: "SOURCE may check whether the requirement is supported. The organisation does not receive the original or unnecessary extracted facts.",
+  },
+] as const;
+
+export const SUPPLIER_REUSE_CHOICES = [
+  {
+    id: "ASK_FOR_REUSE",
+    label: "Ask me before reusing this evidence",
+    help: "SOURCE may recognise a possible match, but will ask you before applying it elsewhere.",
+  },
+  {
+    id: "REUSE_WITHIN_REQUESTING_ORGANISATION",
+    label: "Allow reuse for this organisation",
+    help: "SOURCE may reuse this evidence for compatible requests from this organisation without asking again.",
+  },
+  {
+    id: "NO_REUSE",
+    label: "Do not reuse this evidence",
+    help: "SOURCE will not apply this evidence to another request.",
   },
 ] as const;

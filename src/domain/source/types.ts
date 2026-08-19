@@ -12,7 +12,15 @@ export type EvidenceRoute =
 /** How SOURCE and the manufacturer may use what was provided. Independent from evidence route. */
 export type DisclosureMode = "SHARE_SOURCE" | "PROTECTED_SOURCE" | "VERIFICATION_ONLY" | "CANNOT_DISCLOSE";
 
-export type EvidenceReusePolicy = "NO_REUSE" | "REUSE_WITHIN_REQUESTING_ORGANISATION" | "BROADER_REUSE";
+export type EvidenceReusePolicy =
+  | "NO_REUSE"
+  | "ASK_FOR_REUSE"
+  | "REUSE_WITHIN_REQUESTING_ORGANISATION"
+  | "BROADER_REUSE";
+
+export type ReuseConsentStatus = "PENDING" | "APPROVED" | "DECLINED" | "EXPIRED" | "SUPERSEDED";
+
+export type ReuseConsentDecision = "APPROVED" | "DECLINED";
 
 export type RequirementAssessmentResult = "SUFFICIENT" | "INSUFFICIENT" | "CONFLICTING" | "REVIEW_REQUIRED";
 
@@ -87,6 +95,34 @@ export interface CannotProvideResponse {
   disclosureAcceptanceId?: string;
   createdAt: string;
   createdBy: string;
+}
+
+/** Scope-specific reuse permission. Does not change the evidence's global reusePolicy. */
+export interface EvidenceReuseConsent {
+  id: string;
+  key: string;
+  evidenceId: string;
+  caseId: string;
+  requirementId: string;
+  productIds: string[];
+  originalCaseId?: string;
+  originalRequirementId?: string;
+  originalProductIds: string[];
+  originalScopeLabel?: string;
+  proposedScopeLabel?: string;
+  requestingOrganisationId: string;
+  supplierId: string;
+  purpose: Purpose;
+  evidenceReusePolicy: EvidenceReusePolicy;
+  disclosureMode?: DisclosureMode;
+  disclosureAcceptanceId?: string;
+  agreementVersion?: string;
+  status: ReuseConsentStatus;
+  createdAt: string;
+  decidedAt?: string;
+  decidedBy?: string;
+  decision?: ReuseConsentDecision;
+  grantId?: string;
 }
 
 export type Purpose = "DPP_COMPLIANCE" | "CUSTOMER_REQUEST" | "INTERNAL";
@@ -252,6 +288,7 @@ export type ExceptionCode =
   | "PERMISSION_DENIED"
   | "PERMISSION_REVOKED"
   | "AUTHORIZATION_REQUIRED"
+  | "REUSE_CONSENT_REQUIRED"
   | "SOURCE_UNAVAILABLE"
   | "ALLOCATION_UNKNOWN"
   | "CHAIN_CYCLE"
@@ -315,6 +352,7 @@ export type CaseFilter =
 export type ReuseOutcome =
   | "READY"
   | "AUTHORIZATION_REQUIRED"
+  | "CONSENT_REQUIRED"
   | "VERIFICATION_ONLY_AVAILABLE"
   | "PRIVATE"
   | "EXPIRED"
@@ -577,7 +615,7 @@ export interface HumanTask {
   ownerLabel: string;
   status: "open" | "done";
   createdAt: string;
-  kind: "identity" | "conflict" | "escalation" | "contact" | "nda" | "review";
+  kind: "identity" | "conflict" | "escalation" | "contact" | "nda" | "review" | "reuse";
 }
 
 export interface AuditEvent {
@@ -708,6 +746,7 @@ export interface EngineState {
   disclosureAcceptances: DisclosureAgreementAcceptance[];
   requirementAssessments: RequirementEvidenceAssessment[];
   cannotProvideResponses: CannotProvideResponse[];
+  reuseConsents: EvidenceReuseConsent[];
   tenant: { id: string; name: string; identityAutoLinkThreshold: number };
   seq: number;
 }
@@ -851,6 +890,15 @@ export type Command =
       cannotProvideReason?: CannotProvideReason;
       /** SOURCE-only. Portal dispatch strips this. */
       issuerClass?: EvidenceIssuerClass;
+    }
+  | {
+      type: "DECIDE_EVIDENCE_REUSE";
+      caseId: string;
+      consentId?: string;
+      evidenceId?: string;
+      decision: ReuseConsentDecision;
+      portalGrantId?: string;
+      decidedBy?: string;
     }
   | { type: "GRANT_PERMISSION"; caseId: string }
   | { type: "DENY_PERMISSION"; caseId: string }

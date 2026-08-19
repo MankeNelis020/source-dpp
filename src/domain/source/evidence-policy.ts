@@ -7,6 +7,7 @@ import type {
   EvidenceRoute,
   InformationRequirement,
   LegacyVisibility,
+  Purpose,
   RequirementAssessmentResult,
   ResolutionCaseState,
   TrustLevel,
@@ -33,6 +34,12 @@ export const EVIDENCE_ROUTE_LABEL: Record<EvidenceRoute, string> = {
   ALTERNATIVE_DOCUMENT: "Alternative evidence",
   SUPPLIER_ATTESTATION: "Authorised declaration",
   CANNOT_PROVIDE: "Cannot provide or disclose",
+};
+
+export const PURPOSE_LABEL: Record<Purpose, string> = {
+  DPP_COMPLIANCE: "Digital Product Passport evidence",
+  CUSTOMER_REQUEST: "Customer request",
+  INTERNAL: "Internal",
 };
 
 export function classifyEvidenceStrength(input: {
@@ -156,9 +163,33 @@ export function effectiveDisclosureMode(
 }
 
 export function reuseRank(policy: EvidenceReusePolicy | undefined): number {
-  if (policy === "BROADER_REUSE") return 2;
-  if (policy === "REUSE_WITHIN_REQUESTING_ORGANISATION") return 1;
+  if (policy === "BROADER_REUSE") return 3;
+  if (policy === "REUSE_WITHIN_REQUESTING_ORGANISATION") return 2;
+  if (policy === "ASK_FOR_REUSE") return 1;
   return 0;
+}
+
+export function isSupportedReusePolicy(policy: string | undefined): policy is EvidenceReusePolicy {
+  return (
+    policy === "NO_REUSE" ||
+    policy === "ASK_FOR_REUSE" ||
+    policy === "REUSE_WITHIN_REQUESTING_ORGANISATION" ||
+    policy === "BROADER_REUSE"
+  );
+}
+
+/**
+ * Default reuse choice for new supplier submissions.
+ *
+ * Portal UX preselects ASK_FOR_REUSE. Terms acceptance from the portal uses
+ * REUSE_WITHIN_REQUESTING_ORGANISATION as a ceiling so the supplier can still
+ * choose Ask / same organisation / Do not reuse. BROADER_REUSE is never the
+ * default. Unspecified historical acceptances stay NO_REUSE (fail closed).
+ */
+export function defaultEvidenceReusePolicy(accepted?: EvidenceReusePolicy): EvidenceReusePolicy {
+  const preferred: EvidenceReusePolicy = "ASK_FOR_REUSE";
+  if (!accepted) return preferred;
+  return reuseRank(preferred) > reuseRank(accepted) ? accepted : preferred;
 }
 
 export function defaultAcceptedEvidenceRoutes(

@@ -7,6 +7,7 @@ import { sourceHasExecutablePlan, summarizeMissingRequirements } from "@/domain/
 import { currentDataDisclosureTerms } from "@/domain/source/disclosure-terms";
 import {
   DISCLOSURE_MODE_LABEL,
+  PURPOSE_LABEL,
   TRUST_STRENGTH_LABEL,
   defaultAcceptedEvidenceRoutes,
   effectiveDisclosureMode,
@@ -253,6 +254,7 @@ export async function getCaseDetail(store: PersistencePort, principal: Principal
       : undefined,
     evidence: projectEvidenceForState(state, evidence, principal.capabilities),
     evidenceSummary: manufacturerEvidenceSummary(state, resolution, evidence, claim, principal.capabilities),
+    reuseConsent: manufacturerReuseConsent(state, caseId),
     contacts,
   };
 }
@@ -471,6 +473,29 @@ export async function getSupplierPortalView(store: PersistencePort, principal: P
         }
       : null,
     questions,
+    reuseRequests: state.reuseConsents
+      .filter((row) => principal.allowedCaseIds.includes(row.caseId) && row.supplierId === principal.actorId)
+      .filter((row) => row.status === "PENDING" || row.status === "APPROVED" || row.status === "DECLINED")
+      .map((row) => {
+        const evidence = state.evidence.find((item) => item.id === row.evidenceId);
+        const requirement = state.requirements.find((item) => item.id === row.requirementId);
+        return {
+          id: row.id,
+          caseId: row.caseId,
+          status: row.status,
+          evidenceLabel: evidence?.filename ?? row.originalScopeLabel ?? "Previously supplied evidence",
+          originalUse: row.originalScopeLabel,
+          proposedUse: row.proposedScopeLabel,
+          proposedProducts: (row.productIds ?? [])
+            .map((id) => state.subjects.find((s) => s.id === id)?.name ?? id)
+            .filter(Boolean),
+          requesterName: state.tenant.name,
+          purpose: row.purpose,
+          purposeLabel: PURPOSE_LABEL[row.purpose] ?? row.purpose.replaceAll("_", " "),
+          disclosureLabel: row.disclosureMode ? DISCLOSURE_MODE_LABEL[row.disclosureMode] : undefined,
+          propertyLabel: requirement?.propertyLabel,
+        };
+      }),
   };
 }
 
@@ -501,6 +526,7 @@ function manufacturerEvidenceSummary(
         organisationId: state.tenant.id,
       })
     : undefined;
+  const consent = state.reuseConsents.find((row) => row.caseId === resolution.id);
   const originalAccess =
     !evidence || mode === "CANNOT_DISCLOSE"
       ? "not_shared"
@@ -508,18 +534,25 @@ function manufacturerEvidenceSummary(
         ? "confidential"
         : "available";
   const status =
-    resolution.state === "READY" || resolution.state === "MONITORING"
-      ? "Supported"
-      : resolution.state === "CONFLICT"
-        ? "Needs review"
-        : claim
+    consent?.status === "PENDING"
+      ? "Waiting for supplier reuse permission"
+      : consent?.status === "APPROVED" && (resolution.state === "VALIDATING" || resolution.state === "EVIDENCE_REQUIRED")
+        ? "Existing evidence reuse approved"
+        : resolution.state === "READY" || resolution.state === "MONITORING"
+          ? consent
+            ? "Existing evidence reused"
+            : "Supported"
+        : resolution.state === "CONFLICT"
           ? "Needs review"
-          : "Unresolved";
+          : claim
+            ? "Needs review"
+            : "Unresolved";
   return {
     status,
     evidenceStrength: claim?.trustLevel ?? assessment?.evidenceStrength,
     evidenceStrengthLabel: claim?.trustLevel ? TRUST_STRENGTH_LABEL[claim.trustLevel] : undefined,
-    evidenceSource: evidence ? "Supplier-provided" : "None",
+    evidenceSource:
+      consent?.status === "PENDING" && !evidence ? "May already exist" : evidence ? "Supplier-provided" : "None",
     disclosureMode: mode,
     disclosureLabel: mode ? DISCLOSURE_MODE_LABEL[mode] : undefined,
     originalAccess,
@@ -528,6 +561,22 @@ function manufacturerEvidenceSummary(
     sufficiency: assessment?.result,
     sufficiencyReason: assessment?.reason,
     route: evidence?.route,
+  };
+}
+
+function manufacturerReuseConsent(state: EngineState, caseId: string) {
+  const consent = state.reuseConsents.find((row) => row.caseId === caseId);
+  if (!consent) return undefined;
+  return {
+    status: consent.status,
+    headline:
+      consent.status === "PENDING"
+        ? "Evidence may already exist. Waiting for supplier reuse permission."
+        : consent.status === "APPROVED"
+          ? "Existing evidence reuse approved. SOURCE will assess whether it supports this requirement."
+          : consent.status === "DECLINED"
+            ? "Supplier declined reuse. Collect new evidence."
+            : "Reuse request is no longer current.",
   };
 }
 

@@ -224,6 +224,9 @@ async function executeCommand(args: {
     result = applyCommand(state, envelope.command, now);
   } catch (error) {
     if (error instanceof EngineValidationError) {
+      if (error.code === "REUSE_CONSENT_FORBIDDEN" || error.code === "SCOPE_FORGERY") {
+        throw new SourceError("FORBIDDEN", error.message, 403);
+      }
       throw new SourceError("VALIDATION", error.message, 400);
     }
     throw error;
@@ -371,6 +374,13 @@ function bindPortalDisclosure(principal: Extract<AnyPrincipal, { kind: "supplier
       portalGrantId: principal.grantId,
       issuerClass: undefined,
       supportsCaseIds,
+    };
+  }
+  if (command.type === "DECIDE_EVIDENCE_REUSE") {
+    return {
+      ...command,
+      portalGrantId: principal.grantId,
+      decidedBy: principal.actorId,
     };
   }
   return command;

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { SourceWordmark } from "@/components/source/wordmark";
 import { EvidenceLine, SourceButton, SourceLabel, StatusPill } from "@/components/source/ui";
-import { SUPPLIER_ACTIONS, SUPPLIER_DISCLOSURE_MODES } from "@/domain/source/copy";
+import { SUPPLIER_ACTIONS, SUPPLIER_DISCLOSURE_MODES, SUPPLIER_REUSE_CHOICES } from "@/domain/source/copy";
 import { uploadSourceFile, usePortalCommand, useSourceQuery } from "@/client/source/api";
 import type {
   CannotProvideReason,
@@ -65,6 +65,20 @@ interface PortalView {
     whyRequested?: string;
     submitted?: boolean;
   }[];
+    reuseRequests?: {
+    id: string;
+    caseId: string;
+    status: string;
+    evidenceLabel?: string;
+    originalUse?: string;
+    proposedUse?: string;
+    proposedProducts?: string[];
+    requesterName: string;
+    purpose?: string;
+    purposeLabel?: string;
+    disclosureLabel?: string;
+    propertyLabel?: string;
+  }[];
 }
 
 const ROUTE_BY_ACTION: Partial<Record<ActionId, EvidenceRoute>> = {
@@ -98,7 +112,11 @@ export default function SupplierPortalPage() {
   const [authorityConfirmed, setAuthorityConfirmed] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [showFullTerms, setShowFullTerms] = useState(false);
-  const [reusePolicy, setReusePolicy] = useState<EvidenceReusePolicy>("NO_REUSE");
+  const pendingReuse = useMemo(
+    () => (data?.reuseRequests ?? []).filter((row) => row.status === "PENDING"),
+    [data?.reuseRequests]
+  );
+  const [reusePolicy, setReusePolicy] = useState<EvidenceReusePolicy>("ASK_FOR_REUSE");
   const [disclosureMode, setDisclosureMode] = useState<DisclosureMode>("PROTECTED_SOURCE");
   const [cannotReason, setCannotReason] = useState<CannotProvideReason>("commercially_sensitive");
   const [attestation, setAttestation] = useState({
@@ -133,12 +151,41 @@ export default function SupplierPortalPage() {
         termsAccepted,
         agreementId: data.disclosure.terms.agreementId,
         agreementVersion: data.disclosure.terms.version,
-        reusePolicy,
+        reusePolicy: "REUSE_WITHIN_REQUESTING_ORGANISATION",
       });
+      setReusePolicy("ASK_FOR_REUSE");
       setStep("list");
       await reload();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "The terms could not be recorded.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function decideReuse(row: NonNullable<PortalView["reuseRequests"]>[number], decision: "APPROVED" | "DECLINED") {
+    if (busy || !token) return;
+    setBusy(true);
+    try {
+      await runCommand({
+        type: "DECIDE_EVIDENCE_REUSE",
+        caseId: row.caseId,
+        consentId: row.id,
+        decision,
+      });
+      if (decision === "DECLINED") {
+        setCaseId(row.caseId);
+        setAction(null);
+        setStep("act");
+        setMessage(null);
+        await reload();
+        return;
+      }
+      finish(
+        "Reuse authorised for this request. SOURCE will assess whether the evidence is sufficient. Approval does not change how the original file may be disclosed."
+      );
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "The reuse decision could not be recorded.");
     } finally {
       setBusy(false);
     }
@@ -400,18 +447,6 @@ export default function SupplierPortalPage() {
               ))}
             </div>
           )}
-          <label className="mt-6 block text-[12px]">
-            Reuse for this request
-            <select
-              className="mt-1 w-full border border-[#101A15]/15 px-3 py-2"
-              value={reusePolicy}
-              onChange={(e) => setReusePolicy(e.target.value as EvidenceReusePolicy)}
-            >
-              <option value="NO_REUSE">Do not reuse this evidence for other requests</option>
-              <option value="REUSE_WITHIN_REQUESTING_ORGANISATION">Allow reuse only within this organisation</option>
-              <option value="BROADER_REUSE">Permit broader reuse if SOURCE later asks (never silent, never automatic)</option>
-            </select>
-          </label>
           <label className="mt-4 flex items-start gap-2 text-[13px]">
             <input type="checkbox" checked={authorityConfirmed} onChange={(e) => setAuthorityConfirmed(e.target.checked)} />
             <span>I confirm that I am authorised to provide this information on behalf of my organisation.</span>
@@ -433,6 +468,18 @@ export default function SupplierPortalPage() {
           <h1 className="mt-2 font-[family-name:var(--font-space)] text-[24px] tracking-[-0.02em]">
             What {data?.requesterName ?? "the manufacturer"} still needs
           </h1>
+          {pendingReuse.length ? (
+            <div className="mt-6 space-y-4">
+              {pendingReuse.map((row) => (
+                <ReuseConsentCard
+                  key={row.id}
+                  row={row}
+                  busy={busy}
+                  onDecide={(decision) => void decideReuse(row, decision)}
+                />
+              ))}
+            </div>
+          ) : null}
           <ul className="mt-6 space-y-2">
             {openQuestions.map((item) => (
               <li key={item.id}>
@@ -447,6 +494,9 @@ export default function SupplierPortalPage() {
                 >
                   <div className="text-[14.5px]">{item.propertyLabel}</div>
                   <SourceLabel className="mt-1 block">{item.subjectLabel}</SourceLabel>
+                  {pendingReuse.some((row) => row.caseId === item.id) ? (
+                    <p className="mt-2 text-[12px] text-[#0B6E50]">We may already have the evidence needed.</p>
+                  ) : null}
                 </button>
               </li>
             ))}
@@ -465,6 +515,14 @@ export default function SupplierPortalPage() {
           {current.whyRequested ? (
             <p className="mt-4 text-[14.5px] leading-relaxed text-[#101A15]/75">{current.whyRequested}</p>
           ) : null}
+          {pendingReuse.filter((row) => row.caseId === current.id).map((row) => (
+            <ReuseConsentCard
+              key={row.id}
+              row={row}
+              busy={busy}
+              onDecide={(decision) => void decideReuse(row, decision)}
+            />
+          ))}
           <div className="mt-6 grid gap-2">
             {SUPPLIER_ACTIONS.map((item) => (
               <button
@@ -543,6 +601,28 @@ export default function SupplierPortalPage() {
                     />
                     {item.label}
                     <span className="mt-1 block text-[#101A15]/55">{item.help}</span>
+                  </label>
+                ))}
+              </fieldset>
+              <fieldset className="space-y-2">
+                <legend className="text-[12px]">Can SOURCE reuse this evidence if it appears relevant later?</legend>
+                <p className="text-[12px] text-[#101A15]/55">
+                  This evidence may also be relevant to other products or future information requests.
+                </p>
+                {SUPPLIER_REUSE_CHOICES.map((item) => (
+                  <label key={item.id} className="block border border-[#101A15]/10 px-3 py-2 text-[12px]">
+                    <input
+                      type="radio"
+                      className="mr-2"
+                      checked={reusePolicy === item.id}
+                      onChange={() => setReusePolicy(item.id)}
+                    />
+                    {item.label}
+                    <span className="mt-1 block text-[#101A15]/55">
+                      {item.id === "REUSE_WITHIN_REQUESTING_ORGANISATION"
+                        ? `SOURCE may reuse this evidence for compatible requests from ${data?.requesterName ?? "this organisation"} without asking again.`
+                        : item.help}
+                    </span>
                   </label>
                 ))}
               </fieldset>
@@ -638,5 +718,57 @@ export default function SupplierPortalPage() {
         </>
       ) : null}
     </div>
+  );
+}
+
+function ReuseConsentCard(props: {
+  row: NonNullable<PortalView["reuseRequests"]>[number];
+  busy: boolean;
+  onDecide: (decision: "APPROVED" | "DECLINED") => void;
+}) {
+  const { row, busy, onDecide } = props;
+  return (
+    <section className="mt-6 border border-[#101A15]/10 bg-[#FBFCFA] p-4">
+      <SourceLabel>We may already have the evidence needed</SourceLabel>
+      <p className="mt-3 text-[14.5px] leading-relaxed">
+        You previously shared <span className="font-medium">{row.evidenceLabel ?? "this evidence"}</span>
+        {row.originalUse ? `. Originally used for ${row.originalUse}` : "."}
+      </p>
+      <p className="mt-3 text-[13px] text-[#101A15]/75">
+        SOURCE believes this evidence may also support{" "}
+        {(row.proposedProducts && row.proposedProducts.length > 0
+          ? row.proposedProducts
+          : [row.proposedUse]
+        )
+          .filter(Boolean)
+          .join(", ") || "this request"}
+        .
+      </p>
+      <dl className="mt-4 space-y-2 text-[12px] text-[#101A15]/70">
+        <div>
+          <dt className="font-medium text-[#101A15]">Requested by</dt>
+          <dd>{row.requesterName}</dd>
+        </div>
+        <div>
+          <dt className="font-medium text-[#101A15]">Purpose</dt>
+          <dd>{row.purposeLabel ?? row.purpose ?? "This information request"}</dd>
+        </div>
+        {row.disclosureLabel ? (
+          <div>
+            <dt className="font-medium text-[#101A15]">Original evidence disclosure</dt>
+            <dd>{row.disclosureLabel}</dd>
+          </div>
+        ) : null}
+      </dl>
+      <p className="mt-3 text-[12px] text-[#101A15]/55">No new upload is required if you approve reuse.</p>
+      <div className="mt-4 flex flex-col gap-2">
+        <SourceButton onClick={() => onDecide("APPROVED")} disabled={busy}>
+          Allow reuse for this request
+        </SourceButton>
+        <SourceButton variant="ghost" onClick={() => onDecide("DECLINED")} disabled={busy}>
+          Do not reuse — I&apos;ll provide evidence separately
+        </SourceButton>
+      </div>
+    </section>
   );
 }

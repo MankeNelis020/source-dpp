@@ -48,6 +48,7 @@ interface CaseDetail {
     sufficiency?: string;
     sufficiencyReason?: string;
   };
+  reuseConsent?: { status: string; headline: string };
   contacts: { id: string; role: string; name: string; valid: boolean }[];
   delivery?: {
     status: string;
@@ -93,12 +94,25 @@ export default function ResolutionCasePage() {
       <h1 className="mt-2 font-[family-name:var(--font-space)] text-[33px] font-medium tracking-[-0.02em]">
         {resolution.requirement?.propertyLabel ?? "This gap"}
       </h1>
-      <p className="mt-2 text-[14.5px] text-[#101A15]/70">{resolution.exception?.headline ?? resolution.nextAction}</p>
+      <p className="mt-2 text-[14.5px] text-[#101A15]/70">
+        {resolution.reuseConsent?.headline ?? resolution.exception?.headline ?? resolution.nextAction}
+      </p>
       {notice ? <p className="mt-3 text-[13px] text-[#B26B2C]">{notice}</p> : null}
       <div className="mt-3 flex flex-wrap gap-2">
         <CaseStatePill state={resolution.state} />
         {resolution.blockingReason ? <StatusPill tone="attention">{resolution.blockingReason.replaceAll("_", " ")}</StatusPill> : null}
       </div>
+
+      {resolution.reuseConsent ? (
+        <section className="mt-8 border border-[#101A15]/10 bg-[#FBFCFA] p-5">
+          <SourceLabel>Existing evidence</SourceLabel>
+          <p className="mt-2 text-[14.5px] leading-relaxed">{resolution.reuseConsent.headline}</p>
+          <p className="mt-2 text-[12px] text-[#101A15]/55">
+            The supplier decides whether previously supplied evidence may be used here. SOURCE will not show
+            confidential originals on this page merely because a reuse request exists.
+          </p>
+        </section>
+      ) : null}
 
       <dl className="mt-8 grid gap-4 sm:grid-cols-2">
         <Meta k="Need" v={resolution.requirement?.propertyLabel ?? "—"} />

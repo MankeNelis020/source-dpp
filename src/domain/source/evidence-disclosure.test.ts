@@ -3,6 +3,7 @@ import { applyCommand, emptyState, EngineValidationError } from "./engine";
 import {
   activateDataDisclosureTermsForTests,
   currentDataDisclosureTerms,
+  DATA_DISCLOSURE_TERMS_V1_DRAFT,
   hashDisclosureTermsText,
   resetDataDisclosureTermsForTests,
   type DataDisclosureTerms,
@@ -85,6 +86,18 @@ afterEach(() => {
   resetDataDisclosureTermsForTests();
 });
 
+describe("SOURCE evidence & disclosure V1 — terms versions", () => {
+  it("publishes reuse transparency on a new current version without mutating v1", () => {
+    const current = currentDataDisclosureTerms();
+    expect(current.version).toBe("v1.1-draft-legal-review");
+    expect(current.legalReviewStatus).toBe("REQUIRES_LEGAL_REVIEW");
+    expect(current.reuseSummary).toMatch(/Identifying evidence as potentially relevant does not automatically authorise/i);
+    expect(current.sections.some((section) => section.heading === "Evidence reuse")).toBe(true);
+    expect(DATA_DISCLOSURE_TERMS_V1_DRAFT.version).toBe("v1-draft-legal-review");
+    expect(DATA_DISCLOSURE_TERMS_V1_DRAFT.hash).not.toBe(current.hash);
+  });
+});
+
 describe("SOURCE evidence & disclosure V1 — acceptances", () => {
   it("cannot submit evidence without authority confirmation", () => {
     const opened = open();
@@ -124,7 +137,7 @@ describe("SOURCE evidence & disclosure V1 — acceptances", () => {
     expect(row.termsAccepted).toBe(true);
     expect(row.authorityConfirmedAt).toBeTruthy();
     expect(row.acceptedAt).toBeTruthy();
-    expect(row.agreementVersion).toBe("v1-draft-legal-review");
+    expect(row.agreementVersion).toBe(currentDataDisclosureTerms().version);
     expect(row.requestingOrganisationId).toBe("acme");
     expect(row.scopeCaseIds).toContain(opened.caseId);
     expect(row.termsHash).toBe(currentDataDisclosureTerms().hash);
@@ -179,8 +192,8 @@ describe("SOURCE evidence & disclosure V1 — acceptances", () => {
         NOW
       )
     ).toThrow(/updated/i);
-    expect(submitted.state.evidence[0].agreementVersion).toBe("v1-draft-legal-review");
-    expect(submitted.state.disclosureAcceptances[0].agreementVersion).toBe("v1-draft-legal-review");
+    expect(submitted.state.evidence[0].agreementVersion).toBe(first.agreementVersion);
+    expect(submitted.state.disclosureAcceptances[0].agreementVersion).toBe(first.agreementVersion);
   });
 
   it("does not store a foreign organisation as the requesting organisation", () => {
