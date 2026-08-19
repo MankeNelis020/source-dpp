@@ -35,6 +35,7 @@ interface ImportJob {
     products: number;
     suppliers: number;
     relationships: number;
+    productSupplierRelationships?: number;
     requirements: number;
     autoResolvable: number;
     needsAttention: number;
@@ -140,9 +141,10 @@ export default function ImportWizardPage() {
 
       {job?.summary ? (
         <div className="mt-8">
-          <div className="grid gap-6 sm:grid-cols-3">
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
             <Metric value={String(job.summary.products)} label="Products found" />
             <Metric value={String(job.summary.suppliers)} label="Suppliers identified" />
+            <Metric value={String(job.summary.productSupplierRelationships ?? 0)} label="Product–supplier relationships" />
             <Metric value={String(job.summary.relationships)} label="Component relationships" />
           </div>
           <ul className="mt-6 space-y-1 font-[family-name:var(--font-plex)] text-[12px] text-[#101A15]/65">
@@ -161,7 +163,9 @@ export default function ImportWizardPage() {
         <div className="mt-10 border border-[#101A15]/10 bg-[#FBFCFA] p-6">
           <h2 className="font-[family-name:var(--font-space)] text-[22px]">Your catalogue is connected.</h2>
           <p className="mt-3 text-[14.5px] leading-relaxed">
-            {job.summary.products} products · {job.summary.suppliers} suppliers · {job.summary.relationships} relationships
+            {job.summary.products} products · {job.summary.suppliers} suppliers ·{" "}
+            {job.summary.productSupplierRelationships ?? 0} product–supplier relationships · {job.summary.relationships}{" "}
+            component relationships
           </p>
           <p className="mt-4 text-[14.5px]">
             SOURCE found {job.summary.requirements} missing information requirements. We can handle {job.summary.autoResolvable} automatically. {job.summary.needsAttention} need your attention or supplier input.

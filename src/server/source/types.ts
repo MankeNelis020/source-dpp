@@ -273,6 +273,7 @@ export interface ImportJob {
     products: number;
     suppliers: number;
     relationships: number;
+    productSupplierRelationships?: number;
     materials?: number;
     requirements: number;
     autoResolvable: number;

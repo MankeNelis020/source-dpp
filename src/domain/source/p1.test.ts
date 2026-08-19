@@ -68,6 +68,18 @@ function req(partial: Partial<InformationRequirement> = {}): InformationRequirem
 }
 
 describe("import mapping and messy input", () => {
+  it("maps combined product+supplier catalogue headers", () => {
+    const mapping = proposeMapping(["sku", "name", "gtin", "manufacturer", "supplier_id", "vendorname", "email", "country"]);
+    expect(mapping.sku).toBe("product.sku");
+    expect(mapping.name).toBe("product.name");
+    expect(mapping.gtin).toBe("product.gtin");
+    expect(mapping.manufacturer).toBe("product.manufacturer");
+    expect(mapping.supplier_id).toBe("supplier.external_id");
+    expect(mapping.vendorname).toBe("supplier.name");
+    expect(mapping.email).toBe("supplier.email");
+    expect(mapping.country).toBe("supplier.country");
+  });
+
   it("proposes qualitative mappings for messy European headers", () => {
     const mapping = proposeMapping(["Vendor No.", "EAN Code", "Art. nr.", "Mystery"]);
     expect(mapping["Vendor No."]).toBe("supplier.external_id");

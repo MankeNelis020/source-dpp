@@ -32,7 +32,7 @@ export default function SuppliersPage() {
       {!loading && rows.length === 0 ? (
         <EmptyState
           title="No suppliers identified yet"
-          description="After you upload products and supplier records, SOURCE lists the organisations it may need to contact."
+          description="After SOURCE identifies suppliers from your catalogue, it lists the organisations it may need to contact."
           action={<SourceButton href="/app/import">Upload your first catalog</SourceButton>}
         />
       ) : (

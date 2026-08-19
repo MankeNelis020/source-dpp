@@ -3,8 +3,8 @@ import type { ImportJob, ImportJobEvent, Principal, RawImportRecord } from "@/se
 import { SourceError } from "@/server/source/types";
 import { hasCapability } from "@/server/source/authorization";
 import { applyCommand, hydrateEngineState } from "@/domain/source/engine";
-import type { EngineState, SubjectKind } from "@/domain/source/types";
-import { resolveIdentity } from "@/domain/source/identity";
+import { resolveIdentity, scoreActor } from "@/domain/source/identity";
+import type { Actor, ContactPoint, EngineState, SubjectKind } from "@/domain/source/types";
 import { isGtinValid, resolveSubjectIdentity } from "@/domain/source/subject-identity";
 import { mappingConfidence, parseDecimal, stripBom } from "@/domain/source/normalize";
 import { buildPilotRequirement, PILOT_DATASET_ID, PILOT_DATASET_VERSION, pilotPropertiesForKind } from "@/domain/source/pilot-dataset";
@@ -219,6 +219,136 @@ function mapped(row: Row, ...keys: string[]) {
     if (row[key]) return row[key];
   }
   return "";
+}
+
+const PUBLIC_EMAIL_DOMAINS = new Set([
+  "gmail.com",
+  "googlemail.com",
+  "hotmail.com",
+  "outlook.com",
+  "yahoo.com",
+  "live.com",
+  "icloud.com",
+  "me.com",
+  "aol.com",
+  "proton.me",
+  "protonmail.com",
+]);
+
+function domainFromEmail(email: string): string | undefined {
+  const at = email.lastIndexOf("@");
+  if (at < 1) return undefined;
+  const domain = email.slice(at + 1).trim().toLowerCase();
+  if (!domain || PUBLIC_EMAIL_DOMAINS.has(domain)) return undefined;
+  return domain;
+}
+
+function supplierDisplayName(row: Row): string {
+  return mapped(row, "supplier.name", "supplier.legal_name", "supplier.external_id");
+}
+
+export function hasSupplierIdentity(row: Row): boolean {
+  return Boolean(mapped(row, "supplier.name", "supplier.legal_name", "supplier.external_id"));
+}
+
+function supplierIdentityKey(row: Row): string | undefined {
+  const name = supplierDisplayName(row);
+  if (!name) return undefined;
+  return mapped(row, "supplier.external_id") || name.toLowerCase().replace(/\s+/g, "-");
+}
+
+function uniqueSupplierIdentityKeys(records: RawImportRecord[]): Set<string> {
+  const keys = new Set<string>();
+  for (const record of records) {
+    const key = supplierIdentityKey(record.normalized);
+    if (key) keys.add(key);
+  }
+  return keys;
+}
+
+function rememberSupplierKeys(ids: Map<string, string>, row: Row, actorId: string) {
+  const key = supplierIdentityKey(row);
+  if (key) ids.set(key, actorId);
+  const nameKey = mapped(row, "supplier.name", "supplier.legal_name").toLowerCase().replace(/\s+/g, "-");
+  if (nameKey && !ids.has(nameKey)) ids.set(nameKey, actorId);
+}
+
+function supplierIdFromProductRow(row: Row, supplierIds: Map<string, string>): string | undefined {
+  if (!hasSupplierIdentity(row)) return undefined;
+  const key = supplierIdentityKey(row);
+  if (key && supplierIds.has(key)) return supplierIds.get(key);
+  const nameKey = mapped(row, "supplier.name", "supplier.legal_name").toLowerCase().replace(/\s+/g, "-");
+  if (nameKey && supplierIds.has(nameKey)) return supplierIds.get(nameKey);
+  return undefined;
+}
+
+function supplierAttributesConflict(actor: Actor, row: Row, contacts: ContactPoint[]): boolean {
+  const name = mapped(row, "supplier.name", "supplier.legal_name");
+  if (name) {
+    const scored = scoreActor({ name, country: mapped(row, "supplier.country") || undefined }, actor);
+    const incoming = name.trim().toLowerCase();
+    const existingName = actor.name.trim().toLowerCase();
+    const existingLegal = actor.legalName.trim().toLowerCase();
+    if (incoming !== existingName && incoming !== existingLegal && (!scored || scored.confidence < 92)) {
+      return true;
+    }
+  }
+  const country = mapped(row, "supplier.country");
+  if (country && actor.country && actor.country !== "Unknown" && country.toUpperCase() !== actor.country.toUpperCase()) {
+    return true;
+  }
+  const email = mapped(row, "supplier.email");
+  const existingEmail = contacts.find((c) => c.actorId === actor.id)?.email;
+  if (email && existingEmail && email.toLowerCase() !== existingEmail.toLowerCase()) {
+    return true;
+  }
+  const vat = mapped(row, "supplier.vat");
+  if (vat && actor.vat && vat.replace(/\s/g, "") !== actor.vat.replace(/\s/g, "")) {
+    return true;
+  }
+  return false;
+}
+
+function enrichSupplierFromRow(actor: Actor, contacts: ContactPoint[], row: Row) {
+  const country = mapped(row, "supplier.country");
+  if (country && (!actor.country || actor.country === "Unknown")) actor.country = country;
+  const vat = mapped(row, "supplier.vat");
+  if (vat && !actor.vat) actor.vat = vat;
+  const email = mapped(row, "supplier.email");
+  const domain = mapped(row, "supplier.domain") || (email ? domainFromEmail(email) : undefined);
+  if (domain && !actor.domain) actor.domain = domain;
+  if (email && !contacts.some((c) => c.actorId === actor.id)) {
+    contacts.push({
+      id: `ct-${actor.id}`,
+      actorId: actor.id,
+      role: "product_data",
+      name: actor.name,
+      email,
+      valid: true,
+    });
+  }
+}
+
+function bindSubjectSupplier(state: EngineState, subjectId: string, supplierId: string) {
+  const subject = state.subjects.find((s) => s.id === subjectId);
+  if (!subject) return;
+  if (!subject.declaredSupplierId) {
+    subject.declaredSupplierId = supplierId;
+  } else if (subject.declaredSupplierId !== supplierId) {
+    return;
+  }
+  for (const requirement of state.requirements) {
+    if (requirement.subjectId !== subjectId && !requirement.productIds.includes(subjectId)) continue;
+    const resolution = state.cases.find((c) => c.id === requirement.linkedCaseId || c.requirementId === requirement.id);
+    if (!resolution) continue;
+    if (!resolution.supplierId) {
+      resolution.supplierId = supplierId;
+      resolution.currentActorId = resolution.currentActorId ?? supplierId;
+      if (!resolution.identityStatus || resolution.identityStatus === "IDENTITY_NOT_FOUND") {
+        resolution.identityStatus = "IDENTITY_MATCHED";
+      }
+    }
+  }
 }
 
 async function emit(store: PersistencePort, job: ImportJob, type: string, payload: ImportJobEvent["payload"], now: Date) {
@@ -484,6 +614,10 @@ export async function runImportJob(
   const acceptedSuppliers = rawRecords.filter((r) => r.sourceFile === "suppliers" && r.status !== "error");
   const acceptedBom = rawRecords.filter((r) => r.sourceFile === "bom" && r.status !== "error");
   const acceptedMaterials = rawRecords.filter((r) => r.sourceFile === "materials" && r.status !== "error");
+  const inlineSupplierRecords = acceptedProducts.filter((r) => hasSupplierIdentity(r.normalized));
+  const supplierSourceRecords = [...acceptedSuppliers, ...inlineSupplierRecords];
+  const detectedSupplierCount = uniqueSupplierIdentityKeys(supplierSourceRecords).size;
+  const productSupplierRowCount = inlineSupplierRecords.length;
 
   for (const stage of STAGES) {
     job.state = stage;
@@ -492,11 +626,12 @@ export async function runImportJob(
     if (stage === "PARSING") {
       await emit(store, job, "progress.updated", { found: acceptedProducts.length, entity: "products" }, now);
       await emit(store, job, "entity.detected", { count: acceptedProducts.length, entity: "products" }, now);
-      await emit(store, job, "entity.detected", { count: acceptedSuppliers.length, entity: "suppliers" }, now);
+      await emit(store, job, "entity.detected", { count: detectedSupplierCount, entity: "suppliers" }, now);
       await emit(store, job, "entity.detected", { count: acceptedMaterials.length, entity: "materials" }, now);
     }
     if (stage === "RELATIONSHIP_BUILDING") {
-      await emit(store, job, "relationship.created", { count: acceptedBom.length }, now);
+      await emit(store, job, "relationship.created", { count: acceptedBom.length, kind: "component" }, now);
+      await emit(store, job, "relationship.created", { count: productSupplierRowCount, kind: "product_supplier" }, now);
     }
     job.processedCount = Math.min(job.totalCount, job.processedCount + Math.ceil(job.totalCount / STAGES.length));
     await emit(store, job, "stage.completed", { stage }, now);
@@ -506,7 +641,8 @@ export async function runImportJob(
   const state = hydrateEngineState(await store.loadEngine(principal.organisationId));
   const requestIdsBefore = new Set(state.requests.map((r) => r.id));
   const identityReviews: IdentityReviewDraft[] = [];
-  const supplierIds = ingestSuppliers(state, acceptedSuppliers, principal, now, identityReviews);
+  const supplierIds = ingestSuppliers(state, supplierSourceRecords, principal, now, identityReviews);
+  const uniqueSupplierCount = new Set(supplierIds.values()).size;
   const productIds = ingestSubjects(state, acceptedProducts, "PRODUCT", principal, now, {
     nameKeys: ["product.name", "product.sku", "product.external_id"],
     externalKeys: ["product.external_id", "product.sku"],
@@ -515,12 +651,14 @@ export async function runImportJob(
     skuKey: "product.sku",
     manufacturerKey: "product.manufacturer",
     identityReviews,
+    supplierIds,
   });
   const componentIds = ingestBom(state, acceptedBom, productIds, supplierIds, principal, now, identityReviews);
   ingestMaterials(state, acceptedMaterials, productIds, componentIds, principal, now);
 
   const generated = generatePilotRequirements(state, principal, now);
-  attachIdentityReviews(state, identityReviews, now);
+  const uniqueIdentityReviews = takeUniqueIdentityReviews(identityReviews);
+  attachIdentityReviews(state, uniqueIdentityReviews, now);
   await emit(store, job, "entity.matched", { count: generated, entity: "requirements" }, now);
 
   const leakedRequests = state.requests.filter((r) => !requestIdsBefore.has(r.id));
@@ -542,17 +680,22 @@ export async function runImportJob(
   await store.saveEngine(principal.organisationId, state);
 
   const planned = state.cases.filter((c) => c.state === "DETECTED" || c.state === "AUTHORIZATION_REQUIRED" || c.state === "SEARCHING_EXISTING_DATA").length;
+  const productSupplierRelationships = [...new Set(productIds.values())].filter((subjectId) => {
+    const subject = state.subjects.find((s) => s.id === subjectId);
+    return Boolean(subject?.declaredSupplierId);
+  }).length;
   job.processedCount = job.totalCount;
   job.summary = {
     products: acceptedProducts.length,
-    suppliers: acceptedSuppliers.length,
+    suppliers: uniqueSupplierCount,
     relationships: acceptedBom.length,
+    productSupplierRelationships,
     materials: acceptedMaterials.length,
     requirements: generated,
     autoResolvable: planned,
-    needsAttention: job.reviewCount + job.errorCount + identityReviews.length,
+    needsAttention: job.reviewCount + job.errorCount + uniqueIdentityReviews.length,
     outreachStarted: false,
-    identityReviews: identityReviews.length,
+    identityReviews: uniqueIdentityReviews.length,
     autoMapped: rawRecords.filter((r) => r.status === "accepted").length,
     reviewRows: job.reviewCount,
     warningRows: job.warningCount,
@@ -563,8 +706,9 @@ export async function runImportJob(
   job.currentStage = job.state;
   await emit(store, job, job.state === "PARTIAL" ? "import.partial" : "import.completed", {
     products: acceptedProducts.length,
-    suppliers: acceptedSuppliers.length,
+    suppliers: uniqueSupplierCount,
     relationships: acceptedBom.length,
+    productSupplierRelationships,
   }, now);
   await store.saveImportJob(job);
   return job;
@@ -575,6 +719,16 @@ interface IdentityReviewDraft {
   createdId: string;
   candidateIds: string[];
   reason: string;
+}
+
+function takeUniqueIdentityReviews(reviews: IdentityReviewDraft[]): IdentityReviewDraft[] {
+  const seen = new Set<string>();
+  return reviews.filter((review) => {
+    const key = `${review.kind}:${review.createdId}:${review.reason}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function apply(state: EngineState, command: Parameters<typeof applyCommand>[1], now: Date) {
@@ -593,25 +747,50 @@ function ingestSuppliers(
   const ids = new Map<string, string>();
   for (const record of records) {
     const row = record.normalized;
-    const name = mapped(row, "supplier.name", "supplier.legal_name", "supplier.external_id");
-    const external = mapped(row, "supplier.external_id") || name.toLowerCase().replace(/\s+/g, "-");
+    const name = supplierDisplayName(row);
+    if (!name) continue;
+    const external = supplierIdentityKey(row) ?? name.toLowerCase().replace(/\s+/g, "-");
+    const email = mapped(row, "supplier.email");
+    const domain = mapped(row, "supplier.domain") || (email ? domainFromEmail(email) : undefined);
     const existingByExternal = state.actors.find((a) => a.id === external);
     if (existingByExternal) {
-      ids.set(external, existingByExternal.id);
+      if (supplierAttributesConflict(existingByExternal, row, state.contacts)) {
+        identityReviews.push({
+          kind: "supplier",
+          createdId: existingByExternal.id,
+          candidateIds: [existingByExternal.id],
+          reason:
+            "Imported supplier attributes conflict with the organisation already stored under this supplier id. Confirm before treating them as the same organisation.",
+        });
+      } else {
+        enrichSupplierFromRow(existingByExternal, state.contacts, row);
+      }
+      rememberSupplierKeys(ids, row, existingByExternal.id);
       continue;
     }
     const identity = resolveIdentity(
       {
         name,
         vat: mapped(row, "supplier.vat") || undefined,
-        domain: mapped(row, "supplier.domain") || undefined,
+        domain,
         country: mapped(row, "supplier.country") || undefined,
       },
       state.actors,
       state.tenant.identityAutoLinkThreshold
     );
     if (identity.autoLinkAllowed && identity.selected && identity.status === "IDENTITY_MATCHED") {
-      ids.set(external, identity.selected.id);
+      if (supplierAttributesConflict(identity.selected, row, state.contacts)) {
+        identityReviews.push({
+          kind: "supplier",
+          createdId: identity.selected.id,
+          candidateIds: [identity.selected.id],
+          reason:
+            "Imported supplier attributes conflict with a matched organisation. Confirm before treating them as the same organisation.",
+        });
+      } else {
+        enrichSupplierFromRow(identity.selected, state.contacts, row);
+      }
+      rememberSupplierKeys(ids, row, identity.selected.id);
       continue;
     }
     const actorId = external;
@@ -623,9 +802,8 @@ function ingestSuppliers(
         kind: "organisation",
         vat: mapped(row, "supplier.vat") || undefined,
         country: mapped(row, "supplier.country") || "Unknown",
-        domain: mapped(row, "supplier.domain") || undefined,
+        domain,
       });
-      const email = mapped(row, "supplier.email");
       if (email) {
         state.contacts.push({
           id: `ct-${actorId}`,
@@ -648,7 +826,7 @@ function ingestSuppliers(
             : "Probable supplier match. Confirm before treating them as the same organisation.",
       });
     }
-    ids.set(external, actorId);
+    rememberSupplierKeys(ids, row, actorId);
   }
   void principal;
   void now;
@@ -669,6 +847,7 @@ function ingestSubjects(
     skuKey?: string;
     manufacturerKey?: string;
     identityReviews: IdentityReviewDraft[];
+    supplierIds?: Map<string, string>;
   }
 ) {
   const ids = new Map<string, string>();
@@ -680,6 +859,7 @@ function ingestSubjects(
     const mpn = keys.mpnKey ? mapped(row, keys.mpnKey) : "";
     const sku = keys.skuKey ? mapped(row, keys.skuKey) : "";
     const manufacturer = keys.manufacturerKey ? mapped(row, keys.manufacturerKey) : "";
+    const supplierId = keys.supplierIds ? supplierIdFromProductRow(row, keys.supplierIds) : undefined;
     const resolution = resolveSubjectIdentity({
       query: {
         name,
@@ -698,6 +878,7 @@ function ingestSubjects(
     });
     if (resolution.autoLinkAllowed && resolution.selected && resolution.decision === "MATCHED") {
       ids.set(external, resolution.selected.id);
+      if (supplierId) bindSubjectSupplier(state, resolution.selected.id, supplierId);
       continue;
     }
     apply(
@@ -711,6 +892,7 @@ function ingestSubjects(
         generateRequirements: false,
         externalId: external,
         sourceReference: `${record.sourceFile}:${record.row}`,
+        supplierId,
         identifiers: [
           gtin ? { scheme: "GTIN" as const, value: gtin } : undefined,
           sku ? { scheme: "SKU" as const, value: sku } : undefined,
@@ -723,6 +905,7 @@ function ingestSubjects(
     const created = state.tenantSubjectMappings.find((m) => m.sourceRecordId === external);
     const createdId = created?.canonicalSubjectId ?? state.subjects[state.subjects.length - 1]?.id;
     ids.set(external, createdId);
+    if (supplierId) bindSubjectSupplier(state, createdId, supplierId);
     if (resolution.decision === "AMBIGUOUS" || resolution.decision === "PROBABLE_MATCH") {
       keys.identityReviews.push({
         kind: "subject",
@@ -851,6 +1034,8 @@ function ingestMaterials(
 }
 
 function supplierForSubject(state: EngineState, subjectId: string): string | undefined {
+  const declared = state.subjects.find((s) => s.id === subjectId)?.declaredSupplierId;
+  if (declared) return declared;
   const asChild = state.subjectRelationships.find((r) => r.childSubjectId === subjectId && r.supplierActorId);
   if (asChild?.supplierActorId) return asChild.supplierActorId;
   const asParent = state.subjectRelationships.find((r) => r.parentSubjectId === subjectId && r.supplierActorId);

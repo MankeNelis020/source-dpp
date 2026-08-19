@@ -247,6 +247,32 @@ describe("B1 runtime persistence survival", () => {
     await restarted.end();
   });
 
+  it("persists an inline product-row supplier across a new PostgresPersistence instance", async () => {
+    const firstPool = createPostgresPool(appUrl, "app");
+    const first = new PostgresPersistence(firstPool);
+    const principal = await provisionEmptyTenant(first, `inline-sup-${Date.now()}`);
+    const products = [
+      "sku,name,gtin,manufacturer,supplier_id,vendorname,email,country",
+      "SRC-001,Oak dining table 180 cm,8712345678901,SOURCE Demo Furniture,SUP-001,Northwood Components GmbH,niel.baaijens@gmail.com,DE",
+      "SRC-002,Oak dining table 220 cm,8712345678918,SOURCE Demo Furniture,SUP-001,Northwood Components GmbH,niel.baaijens@gmail.com,DE",
+    ].join("\n");
+    const job = await createImportJob(first, principal, { products }, NOW);
+    expect(job.summary?.products).toBe(2);
+    expect(job.summary?.suppliers).toBe(1);
+    expect(job.summary?.productSupplierRelationships).toBe(2);
+    await firstPool.end();
+
+    const secondPool = createPostgresPool(appUrl, "app");
+    const second = new PostgresPersistence(secondPool);
+    const state = await second.loadEngine(principal.organisationId);
+    const suppliers = state.actors.filter((a) => a.kind === "organisation" && a.id !== state.tenant.id);
+    expect(suppliers).toHaveLength(1);
+    expect(suppliers[0].id).toBe("SUP-001");
+    expect(suppliers[0].name).toBe("Northwood Components GmbH");
+    expect(state.subjects.filter((s) => s.kind === "PRODUCT" && s.declaredSupplierId === "SUP-001")).toHaveLength(2);
+    await secondPool.end();
+  });
+
   it("keeps Alice's organisation and empty engine after a new PostgresPersistence instance", async () => {
     const firstPool = createPostgresPool(appUrl, "app");
     const first = new PostgresPersistence(firstPool);

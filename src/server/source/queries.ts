@@ -288,11 +288,18 @@ export async function getProductDetail(store: PersistencePort, principal: Princi
     const requirement = state.requirements.find((r) => r.id === c.requirementId);
     return c.productId === productId || requirement?.productIds.includes(productId) || requirement?.subjectId === productId;
   });
+  const supplierId =
+    (subject?.declaredSupplierId && !isConfidentialActor(state, subject.declaredSupplierId)
+      ? subject.declaredSupplierId
+      : undefined) ??
+    relatedCases.find((c) => c.supplierId && !isConfidentialActor(state, c.supplierId))?.supplierId;
   return {
     id: productId,
     name: subject?.name ?? productId,
     kind: subject?.kind ?? "PRODUCT",
     source: subject?.source,
+    supplierId,
+    supplierLabel: supplierId ? safeActorLabel(state, supplierId) : undefined,
     blockers,
     children,
     buckets: {
@@ -640,7 +647,12 @@ export async function listCatalogueProducts(store: PersistencePort, principal: P
       });
       const ready = related.filter((c) => RESOLVED.includes(c.state)).length;
       const identityReview = related.some((c) => c.state === "IDENTITY_REVIEW");
-      const supplierId = related.find((c) => c.supplierId && !isConfidentialActor(state, c.supplierId))?.supplierId;
+      const declaredSupplierId =
+        subject.declaredSupplierId && !isConfidentialActor(state, subject.declaredSupplierId)
+          ? subject.declaredSupplierId
+          : undefined;
+      const supplierId =
+        declaredSupplierId ?? related.find((c) => c.supplierId && !isConfidentialActor(state, c.supplierId))?.supplierId;
       return {
         id: subject.id,
         name: subject.name,
