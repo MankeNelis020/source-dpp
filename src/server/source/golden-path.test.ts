@@ -12,6 +12,7 @@ import { resolvePortalPrincipal } from "@/server/source/portal";
 import { getSupplierPortalView } from "@/server/source/queries";
 import { processOutboxBatch } from "@/infrastructure/outbox/processor";
 import { ROLE_CAPABILITIES } from "@/server/source/authorization";
+import { acceptPortalDisclosure, portalEvidenceSubmit } from "@/server/source/portal-disclosure-test";
 
 const NOW = new Date("2026-08-18T10:00:00.000Z");
 const FIXTURES = join(process.cwd(), "fixtures/p1-manufacturer");
@@ -85,6 +86,7 @@ describe("golden path — manufacturer import to supplier response", () => {
     const state = store.loadEngine("holzwerk");
     const resolution = state.cases.find((c) => c.id === question.id)!;
     const requirement = state.requirements.find((r) => r.id === resolution.requirementId)!;
+    await acceptPortalDisclosure(store, portal, question.id, NOW);
     const outcome = await dispatchCommand({
       store,
       principal: portal,
@@ -94,19 +96,15 @@ describe("golden path — manufacturer import to supplier response", () => {
         principalId: portal.grantId,
         organisationId: portal.organisationId,
         issuedAt: NOW.toISOString(),
-        command: {
-          type: "SUBMIT_RESPONSE",
-          caseId: question.id,
+        command: portalEvidenceSubmit(question.id, {
           value: "42",
-          unit: "%",
           evidence: {
             filename: "recycled-content.pdf",
             extractedValue: "42",
             confidence: 99,
             scope: { kind: "product", id: requirement.subjectId, label: requirement.subjectLabel },
           },
-          permission: "GRANTED",
-        },
+        }),
       },
       now: NOW,
     });
@@ -134,13 +132,11 @@ describe("golden path — manufacturer import to supplier response", () => {
     const portal = await resolvePortalPrincipal(store, token, NOW);
     const view = await getSupplierPortalView(store, portal);
     const question = view.questions[0];
-    const command = {
-      type: "SUBMIT_RESPONSE" as const,
-      caseId: question.id,
+    await acceptPortalDisclosure(store, portal, question.id, NOW);
+    const command = portalEvidenceSubmit(question.id, {
       value: "42",
-      unit: "%",
-      permission: "GRANTED" as const,
-    };
+      evidence: { filename: "recycled-content.pdf" },
+    });
     const first = await dispatchCommand({
       store,
       principal: portal,

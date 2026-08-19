@@ -18,6 +18,7 @@ import { SourceError, type CommandEnvelope, type Principal } from "@/server/sour
 import type { Command } from "@/domain/source/types";
 import { applyCommand } from "@/domain/source/engine";
 import { generateBearerToken, hashToken } from "@/infrastructure/crypto/tokens";
+import { acceptPortalDisclosure, portalEvidenceSubmit } from "@/server/source/portal-disclosure-test";
 
 const NOW = new Date("2026-08-17T09:00:00.000Z");
 
@@ -109,6 +110,7 @@ describe("supplier portal grants", () => {
 
   it("allows a scoped submit and forbids identity merge", async () => {
     const principal = await resolvePortalPrincipal(store, "textile", NOW);
+    await acceptPortalDisclosure(store, principal, "SRC-184830", NOW);
     const ok = await dispatchCommand({
       store,
       principal,
@@ -118,13 +120,11 @@ describe("supplier portal grants", () => {
         principalId: principal.grantId,
         organisationId: principal.organisationId,
         issuedAt: NOW.toISOString(),
-        command: {
-          type: "SUBMIT_RESPONSE",
-          caseId: "SRC-184830",
+        command: portalEvidenceSubmit("SRC-184830", {
           value: "PT",
+          unit: undefined,
           evidence: { filename: "origin.pdf" },
-          permission: "GRANTED",
-        },
+        }),
       },
       now: NOW,
     });

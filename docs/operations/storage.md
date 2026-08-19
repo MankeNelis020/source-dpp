@@ -1,5 +1,7 @@
 # Storage operations
 
+Canonical SOURCE v0.1 production operations: `docs/operations/source-v01-production.md`.
+
 Private buckets only. No public bucket is required.
 
 | Class | Bucket default | Who writes |

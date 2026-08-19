@@ -15,6 +15,7 @@ import { SourceError } from "@/server/source/types";
 import { leakScan } from "@/server/source/confidentiality";
 import { opaqueEvidenceRef } from "@/server/source/disclosure";
 import { evaluatePilotRun } from "@/domain/source/analytics";
+import { acceptPortalDisclosure, portalEvidenceSubmit } from "@/server/source/portal-disclosure-test";
 
 const NOW = new Date("2026-08-18T10:00:00.000Z");
 const FIXTURES = join(process.cwd(), "fixtures/p1-manufacturer");
@@ -471,6 +472,7 @@ describe("B2 durable storage", () => {
     });
     const stored = await finalizeUpload({ store, principal: portal, uploadId: intent.id, objectStorage: storage, now: NOW });
     const requirement = afterExecute.requirements.find((row) => row.id === requirementId)!;
+    await acceptPortalDisclosure(store, portal, caseId, NOW);
     const outcome = await dispatchCommand({
       store,
       principal: portal,
@@ -480,11 +482,8 @@ describe("B2 durable storage", () => {
         principalId: portal.grantId,
         organisationId: portal.organisationId,
         issuedAt: NOW.toISOString(),
-        command: {
-          type: "SUBMIT_RESPONSE",
-          caseId,
+        command: portalEvidenceSubmit(caseId, {
           value: "42",
-          unit: "%",
           evidence: {
             filename: "recycled.pdf",
             storageObjectId: stored.id,
@@ -492,8 +491,7 @@ describe("B2 durable storage", () => {
             confidence: 99,
             scope: { kind: "product", id: requirement.subjectId, label: requirement.subjectLabel },
           },
-          permission: "GRANTED",
-        },
+        }),
       },
       now: NOW,
     });

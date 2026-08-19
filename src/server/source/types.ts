@@ -209,7 +209,8 @@ export type CommandErrorCode =
   | "EXPIRED"
   | "REVOKED"
   | "FILE_TYPE_NOT_ALLOWED"
-  | "STORAGE_UNAVAILABLE";
+  | "STORAGE_UNAVAILABLE"
+  | "SOURCE_UNAVAILABLE";
 
 export class SourceError extends Error {
   constructor(

@@ -117,7 +117,9 @@ export default function ImportWizardPage() {
           Import {job.state === "COMPLETE" || job.state === "PARTIAL" ? "finished" : "running"} · {percent}%
         </p>
       ) : (
-        <p className="mt-2 text-[13px] text-[#101A15]/60">Choose CSV files. SOURCE stores the original privately, then processes it.</p>
+        <p className="mt-2 text-[13px] text-[#101A15]/60">
+          Upload one products CSV. Supplier columns in that file are enough — a separate suppliers file is optional. SOURCE stores the original privately, then processes it.
+        </p>
       )}
 
       {!job ? (

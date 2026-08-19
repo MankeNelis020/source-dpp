@@ -368,6 +368,13 @@ function bindPortalDisclosure(principal: Extract<AnyPrincipal, { kind: "supplier
     };
   }
   if (command.type === "SUBMIT_RESPONSE") {
+    if (!command.evidenceRoute) {
+      throw new SourceError(
+        "VALIDATION",
+        "Choose how this evidence is provided. Portal submissions must use the disclosure protocol.",
+        400
+      );
+    }
     const supportsCaseIds = (command.supportsCaseIds ?? []).filter((id) => principal.allowedCaseIds.includes(id));
     return {
       ...command,

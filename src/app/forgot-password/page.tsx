@@ -5,6 +5,7 @@ import { createBrowserSupabaseClient } from "@/infrastructure/auth/supabase/brow
 import { SourceButton } from "@/components/source/ui";
 import { AuthChrome, AuthField, AuthFooterLink } from "@/components/source/auth-chrome";
 import { api } from "@/client/source/api";
+import { authEmailRedirectTo } from "@/lib/source/auth-origin";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -16,11 +17,13 @@ export default function ForgotPasswordPage() {
     setPending(true);
     try {
       await api("/api/auth/reset", { method: "POST", body: JSON.stringify({ email }) });
-      const config = await api<{ identityProvider: "supabase" | "test" }>("/api/auth/config");
+      const config = await api<{ identityProvider: "supabase" | "test"; appPublicUrl?: string | null }>(
+        "/api/auth/config"
+      );
       if (config.identityProvider === "supabase") {
         const supabase = createBrowserSupabaseClient();
         await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
+          redirectTo: authEmailRedirectTo(config.appPublicUrl, "/reset-password"),
         });
       }
       setSent(true);

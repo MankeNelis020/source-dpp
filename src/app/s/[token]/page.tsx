@@ -33,6 +33,7 @@ interface PortalView {
       purpose: string;
       retentionSummary: string;
       reuseSummary: string;
+      legalReviewStatus?: string;
       sections: { heading: string; body: string }[];
       fullText: string;
     };
@@ -385,6 +386,13 @@ export default function SupplierPortalPage() {
           <p className="mt-3 text-[13px] text-[#101A15]/55">
             {terms.title} · {terms.version}
           </p>
+          {terms.legalReviewStatus === "REQUIRES_LEGAL_REVIEW" ? (
+            <p className="mt-4 border border-[#B26B2C]/40 bg-[#FBFCFA] px-3 py-2 text-[12px] leading-relaxed text-[#101A15]/75">
+              These Data Disclosure Terms are draft product copy for a controlled SOURCE pilot. They
+              require legal review before public production launch. Accepting them records operational
+              consent for this request, not a formally approved legal agreement.
+            </p>
+          ) : null}
           <dl className="mt-6 space-y-4 text-[13px] leading-relaxed text-[#101A15]/75">
             <div>
               <dt className="font-medium text-[#101A15]">Why is this requested?</dt>
