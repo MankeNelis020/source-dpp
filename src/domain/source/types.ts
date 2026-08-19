@@ -529,6 +529,8 @@ export interface CanonicalSubject {
   source: AssignmentSource;
   confidence?: number;
   sourceReference?: string;
+  /** Known supplier actor for this subject when the source row declared one. */
+  declaredSupplierId?: string;
 }
 
 export interface SubjectRelationship {

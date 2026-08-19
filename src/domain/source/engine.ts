@@ -1617,6 +1617,7 @@ function addSubject(
       source,
       confidence: source === "USER_ADDED" ? 100 : source === "AI_EXTRACTED" ? 70 : 90,
       sourceReference: command.sourceReference ?? (source === "USER_ADDED" ? "manual_entry" : undefined),
+      declaredSupplierId: command.supplierId,
     });
     if (command.externalId) {
       state.tenantSubjectMappings.push({
@@ -1632,6 +1633,10 @@ function addSubject(
         createdAt: iso(now),
       });
     }
+  }
+  const subject = state.subjects.find((s) => s.id === subjectId);
+  if (subject && command.supplierId && !subject.declaredSupplierId) {
+    subject.declaredSupplierId = command.supplierId;
   }
   for (const ident of command.identifiers ?? []) {
     if (!state.subjectIdentifiers.some((row) => row.canonicalSubjectId === subjectId && row.scheme === ident.scheme && row.value === ident.value)) {
@@ -1662,6 +1667,11 @@ function addSubject(
         createdBy: command.createdBy ?? "user",
         createdAt: iso(now),
       });
+    } else if (command.supplierId) {
+      const existingRel = state.subjectRelationships.find(
+        (r) => r.parentSubjectId === command.parentSubjectId && r.childSubjectId === subjectId
+      );
+      if (existingRel && !existingRel.supplierActorId) existingRel.supplierActorId = command.supplierId;
     }
   }
   emit({

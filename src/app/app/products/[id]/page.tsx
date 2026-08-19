@@ -20,6 +20,8 @@ export default function ProductDetailPage() {
     requirements?: { id: string; propertyLabel: string; state?: string; selectedRouteReason?: string }[];
     children: { id: string; name: string; kind?: string; source?: string; confidence?: number }[];
     blockers: { caseId: string; property: string; actorLabel: string; reason?: string; state: string }[];
+    supplierId?: string;
+    supplierLabel?: string;
   }>(params.id ? `/api/source/products/${params.id}` : null);
 
   if (error) {
@@ -46,6 +48,11 @@ export default function ProductDetailPage() {
           <div className="mt-3 flex flex-wrap gap-2">
             <StatusPill tone={status === "ready" ? "signal" : "attention"}>{status}</StatusPill>
             {live.source ? <Mono className="text-[12px] text-[#101A15]/55">{live.source}</Mono> : null}
+            {live.supplierLabel ? (
+              <Mono className="text-[12px] text-[#101A15]/55">
+                Supplier {live.supplierId ? <Link href={`/app/suppliers/${live.supplierId}`} className="hover:underline">{live.supplierLabel}</Link> : live.supplierLabel}
+              </Mono>
+            ) : null}
           </div>
         </div>
         <SourceButton href={live.blockers.length ? "/app/missing" : "/app/import"}>
