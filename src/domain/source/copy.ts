@@ -188,12 +188,30 @@ export const CORE_LOOP = [
 ] as const;
 
 export const SUPPLIER_ACTIONS = [
-  { id: "provide", label: "Provide answer" },
-  { id: "upload", label: "Upload evidence" },
-  { id: "existing", label: "Use existing evidence" },
+  { id: "original", label: "Upload original supporting evidence", recommended: true },
+  { id: "alternative", label: "I can't provide the requested document, but I can provide alternative evidence." },
+  { id: "attest", label: "Make an authorised declaration" },
+  { id: "cannot", label: "I cannot provide or disclose this" },
   { id: "upstream", label: "Ask my supplier" },
   { id: "colleague", label: "Assign colleague" },
   { id: "unknown", label: "I don't know" },
-  { id: "decline", label: "I cannot share this" },
   { id: "wrong", label: "I'm not the right person" },
+] as const;
+
+export const SUPPLIER_DISCLOSURE_MODES = [
+  {
+    id: "SHARE_SOURCE",
+    label: "Share the original with this organisation",
+    help: "SOURCE may process the file and the requesting organisation may access the original.",
+  },
+  {
+    id: "PROTECTED_SOURCE",
+    label: "Keep the original confidential",
+    help: "SOURCE may process the file. The organisation receives relevant extracted facts and a provenance summary, not the original file.",
+  },
+  {
+    id: "VERIFICATION_ONLY",
+    label: "Verification only",
+    help: "SOURCE may check whether the requirement is supported. The organisation does not receive the original or unnecessary extracted facts.",
+  },
 ] as const;

@@ -1,5 +1,7 @@
 export * from "./types";
 export * from "./copy";
+export * from "./disclosure-terms";
+export * from "./evidence-policy";
 export * from "./readiness";
 export * from "./permissions";
 export * from "./subjects";

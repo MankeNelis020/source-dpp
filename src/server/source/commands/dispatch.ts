@@ -1,4 +1,4 @@
-import { applyCommand, caseReadiness } from "@/domain/source/engine";
+import { applyCommand, caseReadiness, EngineValidationError } from "@/domain/source/engine";
 import type { Command, EngineState } from "@/domain/source/types";
 import type { PersistencePort } from "@/infrastructure/database/ports";
 import type { RateLimiter } from "@/infrastructure/rate-limit/port";
@@ -159,6 +159,7 @@ export async function dispatchCommand(args: {
         tokenFingerprint: args.tokenFingerprint,
       });
       authorizePortalCommand(principal, envelope.command);
+      envelope.command = bindPortalDisclosure(principal, envelope.command);
     }
   } catch (error) {
     if (error instanceof SourceError && (error.code === "FORBIDDEN" || error.code === "RESOURCE_UNAVAILABLE")) {
@@ -218,7 +219,15 @@ async function executeCommand(args: {
     });
   }
 
-  const result = applyCommand(state, envelope.command, now);
+  let result;
+  try {
+    result = applyCommand(state, envelope.command, now);
+  } catch (error) {
+    if (error instanceof EngineValidationError) {
+      throw new SourceError("VALIDATION", error.message, 400);
+    }
+    throw error;
+  }
   if (result.caseId) {
     const claim = result.state.claims.find((item) => item.caseId === result.caseId && item.ready);
     if (claim) propagateReadyClaim(result.state, claim.id, now);
@@ -333,6 +342,7 @@ async function bindSubmitResponseEvidence(args: {
   }
   return {
     ...args.command,
+    issuerClass: args.principal.kind === "supplier_portal" ? undefined : args.command.issuerClass,
     evidence: {
       ...evidence,
       filename: object.originalFilename,
@@ -343,4 +353,25 @@ async function bindSubmitResponseEvidence(args: {
       availability: "AVAILABLE",
     },
   };
+}
+
+function bindPortalDisclosure(principal: Extract<AnyPrincipal, { kind: "supplier_portal" }>, command: Command): Command {
+  if (command.type === "ACCEPT_EVIDENCE_DISCLOSURE") {
+    return {
+      ...command,
+      caseId: command.caseId,
+      portalGrantId: principal.grantId,
+      acceptedBy: principal.actorId,
+    };
+  }
+  if (command.type === "SUBMIT_RESPONSE") {
+    const supportsCaseIds = (command.supportsCaseIds ?? []).filter((id) => principal.allowedCaseIds.includes(id));
+    return {
+      ...command,
+      portalGrantId: principal.grantId,
+      issuerClass: undefined,
+      supportsCaseIds,
+    };
+  }
+  return command;
 }

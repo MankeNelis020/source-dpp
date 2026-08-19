@@ -30,6 +30,24 @@ interface CaseDetail {
   readiness: { gates: Record<string, string>; ready: boolean; blockingReason?: string };
   exception?: { headline: string; reason: string; nextAction: string; automationPolicy: string };
   conflict?: { leftLabel: string; leftValue: string; rightLabel: string; rightValue: string };
+  claim?: {
+    id: string;
+    value?: string;
+    unit?: string;
+    ready: boolean;
+    trustLevel: string;
+    trustLabel?: string;
+    verificationSummary?: string;
+  };
+  evidenceSummary?: {
+    status: string;
+    evidenceStrengthLabel?: string;
+    evidenceSource: string;
+    disclosureLabel?: string;
+    originalEvidenceLabel: string;
+    sufficiency?: string;
+    sufficiencyReason?: string;
+  };
   contacts: { id: string; role: string; name: string; valid: boolean }[];
   delivery?: {
     status: string;
@@ -91,7 +109,23 @@ export default function ResolutionCasePage() {
         <Meta k="Times SOURCE has tried" v={String(resolution.attempts.length)} />
         <Meta k="Owner" v={resolution.ownerLabel ?? "—"} />
         <Meta k="Identity model" v={`${resolution.identityModelVersion} · not a calibrated probability`} />
+        {resolution.evidenceSummary ? (
+          <>
+            <Meta k="Status" v={resolution.evidenceSummary.status} />
+            <Meta k="Evidence strength" v={resolution.evidenceSummary.evidenceStrengthLabel ?? "—"} />
+            <Meta k="Evidence source" v={resolution.evidenceSummary.evidenceSource} />
+            <Meta k="Disclosure" v={resolution.evidenceSummary.disclosureLabel ?? "—"} />
+            <Meta k="Original evidence" v={resolution.evidenceSummary.originalEvidenceLabel} />
+          </>
+        ) : null}
+        {resolution.claim?.verificationSummary ? <Meta k="Verification" v={resolution.claim.verificationSummary} /> : null}
+        {resolution.claim?.value ? (
+          <Meta k="Derived claim" v={`${resolution.claim.value}${resolution.claim.unit ? ` ${resolution.claim.unit}` : ""}`} />
+        ) : null}
       </dl>
+      {resolution.evidenceSummary?.sufficiencyReason ? (
+        <p className="mt-4 text-[13px] text-[#101A15]/70">{resolution.evidenceSummary.sufficiencyReason}</p>
+      ) : null}
 
       <section className="mt-10 border border-[#101A15]/10 bg-[#FBFCFA] p-5">
         <SourceLabel>What happens next</SourceLabel>

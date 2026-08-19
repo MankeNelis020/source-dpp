@@ -1,9 +1,16 @@
 import { caseReadiness } from "@/domain/source/engine";
 import { explainException } from "@/domain/source/copy";
-import type { CaseFilter, EngineState, ResolutionCase, ResolutionCaseState } from "@/domain/source/types";
+import type { CaseFilter, EngineState, EvidenceRecord, ResolutionCase, ResolutionCaseState } from "@/domain/source/types";
 import { matchesFilter } from "@/domain/source/queries";
 import { evaluatePilotRun, humanPilotSentences } from "@/domain/source/analytics";
 import { sourceHasExecutablePlan, summarizeMissingRequirements } from "@/domain/source/resolution-plan";
+import { currentDataDisclosureTerms } from "@/domain/source/disclosure-terms";
+import {
+  DISCLOSURE_MODE_LABEL,
+  TRUST_STRENGTH_LABEL,
+  defaultAcceptedEvidenceRoutes,
+  effectiveDisclosureMode,
+} from "@/domain/source/evidence-policy";
 import type { PersistencePort } from "@/infrastructure/database/ports";
 import { humanTransportLabel } from "@/infrastructure/email/transport";
 import { hasCapability } from "./authorization";
@@ -233,14 +240,19 @@ export async function getCaseDetail(store: PersistencePort, principal: Principal
     claim: claim
       ? {
           id: claim.id,
-          value: claim.value,
-          unit: claim.unit,
+          value: hideDerivedClaim(evidence, state, caseId) ? undefined : claim.value,
+          unit: hideDerivedClaim(evidence, state, caseId) ? undefined : claim.unit,
           ready: claim.ready,
           trustLevel: claim.trustLevel,
+          trustLabel: TRUST_STRENGTH_LABEL[claim.trustLevel],
           permissionState: claim.permissionState,
+          verificationSummary: hideDerivedClaim(evidence, state, caseId)
+            ? "Requirement assessed against supplier-provided confidential evidence."
+            : undefined,
         }
       : undefined,
     evidence: projectEvidenceForState(state, evidence, principal.capabilities),
+    evidenceSummary: manufacturerEvidenceSummary(state, resolution, evidence, claim, principal.capabilities),
     contacts,
   };
 }
@@ -367,31 +379,155 @@ export async function getNeedsYouTasks(store: PersistencePort, principal: Princi
 export async function getSupplierPortalView(store: PersistencePort, principal: PortalPrincipal) {
   const state = await store.loadEngine(principal.organisationId);
   const cases = state.cases.filter((c) => principal.allowedCaseIds.includes(c.id));
+  const terms = currentDataDisclosureTerms();
+  const actor = state.actors.find((item) => item.id === principal.actorId);
+  const acceptance = state.disclosureAcceptances.find(
+    (row) =>
+      row.grantId === principal.grantId &&
+      row.agreementVersion === terms.version &&
+      row.authorityConfirmed &&
+      row.termsAccepted
+  );
+  const products = [
+    ...new Set(
+      cases.flatMap((c) => {
+        const requirement = state.requirements.find((r) => r.id === c.requirementId);
+        return (requirement?.productIds ?? []).map((id) => state.subjects.find((s) => s.id === id)?.name ?? id);
+      })
+    ),
+  ].filter(Boolean);
+  const questions = cases.map((c) => {
+    const requirement = state.requirements.find((r) => r.id === c.requirementId);
+    const productNames = (requirement?.productIds ?? [])
+      .map((id) => state.subjects.find((s) => s.id === id)?.name ?? id)
+      .filter(Boolean);
+    const policy = requirement ? defaultAcceptedEvidenceRoutes(requirement) : undefined;
+    return {
+      id: c.id,
+      version: c.version,
+      state: c.state,
+      propertyLabel: requirement?.propertyLabel,
+      subjectLabel: requirement?.subjectLabel,
+      nextAction: c.nextAction,
+      purpose: requirement?.purpose,
+      requiredBy: requirement?.requiredBy,
+      productNames,
+      whyRequested: requirement
+        ? `${requirement.propertyLabel} is needed for ${requirement.subjectLabel} (${requirement.purpose.replaceAll("_", " ").toLowerCase()}).`
+        : c.nextAction,
+      submitted: RESOLVED.includes(c.state) || c.state === "RESPONSE_RECEIVED" || c.state === "VALIDATING",
+      acceptedRoutes: policy?.accepted,
+      conditionalRoutes: policy?.conditional,
+      preferredRoutes: policy?.preferred,
+    };
+  });
   return {
     requesterName: state.tenant.name,
     actorId: principal.actorId,
+    actorName: actor?.name,
     allowedCommands: principal.allowedCommands,
-    questions: cases.map((c) => {
-      const requirement = state.requirements.find((r) => r.id === c.requirementId);
-      const products = (requirement?.productIds ?? [])
-        .map((id) => state.subjects.find((s) => s.id === id)?.name ?? id)
-        .filter(Boolean);
-      return {
-        id: c.id,
-        version: c.version,
-        state: c.state,
-        propertyLabel: requirement?.propertyLabel,
-        subjectLabel: requirement?.subjectLabel,
-        nextAction: c.nextAction,
-        purpose: requirement?.purpose,
-        requiredBy: requirement?.requiredBy,
-        productNames: products,
-        whyRequested: requirement
-          ? `${requirement.propertyLabel} is needed for ${requirement.subjectLabel} (${requirement.purpose.replaceAll("_", " ").toLowerCase()}).`
-          : c.nextAction,
-        submitted: RESOLVED.includes(c.state) || c.state === "RESPONSE_RECEIVED" || c.state === "VALIDATING",
-      };
-    }),
+    grantId: principal.grantId,
+    package: {
+      products,
+      requirementLabels: [...new Set(questions.map((q) => q.propertyLabel).filter(Boolean))],
+    },
+    disclosure: {
+      terms: {
+        agreementId: terms.agreementId,
+        version: terms.version,
+        effectiveDate: terms.effectiveDate,
+        legalReviewStatus: terms.legalReviewStatus,
+        hash: terms.hash,
+        title: terms.title,
+        purpose: terms.purpose,
+        retentionSummary: terms.retentionSummary,
+        reuseSummary: terms.reuseSummary,
+        sections: terms.sections,
+        fullText: terms.fullText,
+      },
+      why: "SOURCE needs evidence so it can assess whether each listed requirement is supported. A statement is not automatically treated as proof.",
+      who: state.tenant.name,
+      howUsed: [
+        "Process evidence for this request",
+        "Extract relevant facts or claims",
+        "Assess whether the evidence supports each requirement",
+        "Retain provenance and audit information",
+      ],
+      originalVisibility:
+        "Who can see the original file depends on the disclosure mode you choose. The original does not become public because it was uploaded.",
+      derivedData:
+        "Derived values used in a Digital Product Passport are separate from whether the original file is shared.",
+      reuse: terms.reuseSummary,
+      retention: terms.retentionSummary,
+    },
+    acceptance: acceptance
+      ? {
+          id: acceptance.id,
+          authorityConfirmed: acceptance.authorityConfirmed,
+          termsAccepted: acceptance.termsAccepted,
+          agreementVersion: acceptance.agreementVersion,
+          acceptedAt: acceptance.acceptedAt,
+          reusePolicy: acceptance.reusePolicy,
+        }
+      : null,
+    questions,
+  };
+}
+
+function hideDerivedClaim(evidence: EvidenceRecord | undefined, state: EngineState, caseId: string): boolean {
+  if (!evidence) return false;
+  if (effectiveDisclosureMode(evidence) === "VERIFICATION_ONLY") return true;
+  const permission = state.permissions.find((item) => {
+    const claim = state.claims.find((c) => c.id === item.claimId);
+    return claim?.caseId === caseId;
+  });
+  return permission?.visibility === "VERIFICATION_ONLY" || permission?.visibility === "verification_only";
+}
+
+function manufacturerEvidenceSummary(
+  state: EngineState,
+  resolution: ResolutionCase,
+  evidence: EvidenceRecord | undefined,
+  claim: EngineState["claims"][number] | undefined,
+  capabilities: Principal["capabilities"]
+) {
+  const assessment = [...state.requirementAssessments].reverse().find((row) => row.caseId === resolution.id);
+  const mode = evidence ? effectiveDisclosureMode(evidence) : undefined;
+  const decision = evidence
+    ? evaluateEvidenceDisclosure({
+        state,
+        evidence,
+        capabilities,
+        organisationId: state.tenant.id,
+      })
+    : undefined;
+  const originalAccess =
+    !evidence || mode === "CANNOT_DISCLOSE"
+      ? "not_shared"
+      : mode === "PROTECTED_SOURCE" || mode === "VERIFICATION_ONLY" || !decision?.canRevealFilename
+        ? "confidential"
+        : "available";
+  const status =
+    resolution.state === "READY" || resolution.state === "MONITORING"
+      ? "Supported"
+      : resolution.state === "CONFLICT"
+        ? "Needs review"
+        : claim
+          ? "Needs review"
+          : "Unresolved";
+  return {
+    status,
+    evidenceStrength: claim?.trustLevel ?? assessment?.evidenceStrength,
+    evidenceStrengthLabel: claim?.trustLevel ? TRUST_STRENGTH_LABEL[claim.trustLevel] : undefined,
+    evidenceSource: evidence ? "Supplier-provided" : "None",
+    disclosureMode: mode,
+    disclosureLabel: mode ? DISCLOSURE_MODE_LABEL[mode] : undefined,
+    originalAccess,
+    originalEvidenceLabel:
+      originalAccess === "available" ? "Available" : originalAccess === "confidential" ? "Confidential — source file not shared" : "Not shared",
+    sufficiency: assessment?.result,
+    sufficiencyReason: assessment?.reason,
+    route: evidence?.route,
   };
 }
 

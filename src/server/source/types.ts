@@ -45,7 +45,8 @@ export type PortalCommand =
   | "DECLINE"
   | "REQUEST_CLARIFICATION"
   | "MARK_UNKNOWN"
-  | "MARK_WRONG_CONTACT";
+  | "MARK_WRONG_CONTACT"
+  | "ACCEPT_EVIDENCE_DISCLOSURE";
 
 export interface Organisation {
   id: string;
@@ -332,6 +333,7 @@ export const PORTAL_ALLOWED_DEFAULT: PortalCommand[] = [
   "REQUEST_CLARIFICATION",
   "MARK_UNKNOWN",
   "MARK_WRONG_CONTACT",
+  "ACCEPT_EVIDENCE_DISCLOSURE",
 ];
 
 export const PORTAL_FORBIDDEN = [

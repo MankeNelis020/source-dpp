@@ -2,6 +2,93 @@
 
 export type TrustLevel = "DECLARED" | "EVIDENCED" | "VERIFIED" | "TRACEABLE";
 
+/** How the supplier provided evidence. Independent from disclosure mode. */
+export type EvidenceRoute =
+  | "ORIGINAL_DOCUMENT"
+  | "ALTERNATIVE_DOCUMENT"
+  | "SUPPLIER_ATTESTATION"
+  | "CANNOT_PROVIDE";
+
+/** How SOURCE and the manufacturer may use what was provided. Independent from evidence route. */
+export type DisclosureMode = "SHARE_SOURCE" | "PROTECTED_SOURCE" | "VERIFICATION_ONLY" | "CANNOT_DISCLOSE";
+
+export type EvidenceReusePolicy = "NO_REUSE" | "REUSE_WITHIN_REQUESTING_ORGANISATION" | "BROADER_REUSE";
+
+export type RequirementAssessmentResult = "SUFFICIENT" | "INSUFFICIENT" | "CONFLICTING" | "REVIEW_REQUIRED";
+
+/** SOURCE-classified issuer. Never accepted from a supplier portal payload. */
+export type EvidenceIssuerClass =
+  | "supplier"
+  | "third_party"
+  | "laboratory"
+  | "accredited_certifier"
+  | "official_registry"
+  | "competent_authority";
+
+export type CannotProvideReason =
+  | "confidentiality"
+  | "commercially_sensitive"
+  | "unavailable"
+  | "not_responsible"
+  | "unknown"
+  | "another_party"
+  | "other";
+
+export interface SupplierAttestation {
+  legalEntity: string;
+  personName: string;
+  role: string;
+  statement: string;
+  productIds: string[];
+  requirementIds: string[];
+}
+
+export interface DisclosureAgreementAcceptance {
+  id: string;
+  grantId?: string;
+  requestId?: string;
+  supplierId?: string;
+  requestingOrganisationId: string;
+  purpose: Purpose;
+  scopeCaseIds: string[];
+  scopeProductIds: string[];
+  agreementId: string;
+  agreementVersion: string;
+  termsHash: string;
+  authorityConfirmed: boolean;
+  authorityConfirmedAt?: string;
+  authorityConfirmedBy?: string;
+  termsAccepted: boolean;
+  acceptedAt?: string;
+  acceptedBy?: string;
+  reusePolicy: EvidenceReusePolicy;
+  createdAt: string;
+}
+
+export interface RequirementEvidenceAssessment {
+  id: string;
+  caseId: string;
+  requirementId: string;
+  evidenceId?: string;
+  claimId?: string;
+  result: RequirementAssessmentResult;
+  evidenceStrength?: TrustLevel;
+  reason: string;
+  assessedAt: string;
+  assessedBy: "SOURCE_SYSTEM";
+}
+
+export interface CannotProvideResponse {
+  id: string;
+  caseId: string;
+  grantId?: string;
+  reason: CannotProvideReason;
+  note?: string;
+  disclosureAcceptanceId?: string;
+  createdAt: string;
+  createdBy: string;
+}
+
 export type Purpose = "DPP_COMPLIANCE" | "CUSTOMER_REQUEST" | "INTERNAL";
 
 export type AutomationLevel = "L0" | "L1" | "L2" | "L3";
@@ -314,6 +401,9 @@ export interface InformationRequirement {
   resolvedByClaimId?: string;
   selectedRoute?: string;
   selectedRouteReason?: string;
+  preferredEvidenceRoutes?: EvidenceRoute[];
+  acceptedEvidenceRoutes?: EvidenceRoute[];
+  conditionallyAcceptedEvidenceRoutes?: EvidenceRoute[];
 }
 
 export interface ResolutionCase {
@@ -436,6 +526,14 @@ export interface EvidenceRecord {
   uploadedViaPortalGrantId?: string;
   uploadedByPrincipalId?: string;
   createdAt?: string;
+  route?: EvidenceRoute;
+  disclosureMode?: DisclosureMode;
+  reusePolicy?: EvidenceReusePolicy;
+  disclosureAcceptanceId?: string;
+  agreementVersion?: string;
+  issuerClass?: EvidenceIssuerClass;
+  attestation?: SupplierAttestation;
+  strengthReason?: string;
 }
 
 export interface EvidenceScope {
@@ -607,6 +705,9 @@ export interface EngineState {
   contactAvoidances: SupplierContactAvoided[];
   pilotRuns: PilotRun[];
   requestGroups: RequestGroup[];
+  disclosureAcceptances: DisclosureAgreementAcceptance[];
+  requirementAssessments: RequirementEvidenceAssessment[];
+  cannotProvideResponses: CannotProvideResponse[];
   tenant: { id: string; name: string; identityAutoLinkThreshold: number };
   seq: number;
 }
@@ -711,6 +812,17 @@ export type Command =
     }
   | { type: "DECLINE"; caseId: string; reason: DeclineReason; note?: string }
   | {
+      type: "ACCEPT_EVIDENCE_DISCLOSURE";
+      caseId: string;
+      authorityConfirmed: boolean;
+      termsAccepted: boolean;
+      agreementId: string;
+      agreementVersion: string;
+      portalGrantId?: string;
+      reusePolicy?: EvidenceReusePolicy;
+      acceptedBy?: string;
+    }
+  | {
       type: "SUBMIT_RESPONSE";
       caseId: string;
       value: string;
@@ -729,6 +841,16 @@ export type Command =
       };
       permission: PermissionState;
       visibility?: PermissionGrant["visibility"];
+      evidenceRoute?: EvidenceRoute;
+      disclosureMode?: DisclosureMode;
+      reusePolicy?: EvidenceReusePolicy;
+      disclosureAcceptanceId?: string;
+      portalGrantId?: string;
+      supportsCaseIds?: string[];
+      attestation?: SupplierAttestation;
+      cannotProvideReason?: CannotProvideReason;
+      /** SOURCE-only. Portal dispatch strips this. */
+      issuerClass?: EvidenceIssuerClass;
     }
   | { type: "GRANT_PERMISSION"; caseId: string }
   | { type: "DENY_PERMISSION"; caseId: string }
