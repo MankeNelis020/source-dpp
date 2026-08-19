@@ -7,6 +7,7 @@ import { PostgresPersistence } from "@/infrastructure/database/postgres";
 import { requireDatabaseUrl, runtimeAppDatabaseUrl } from "@/infrastructure/database/seed-postgres";
 import { createPostgresPool } from "@/infrastructure/database/pool";
 import { emptyState } from "@/domain/source/engine";
+import { summarizeMissingRequirements, resolutionPlanInvariantHolds } from "@/domain/source/resolution-plan";
 import { createImportJob } from "@/server/source/import/service";
 import { executeResolutionRun } from "@/server/source/resolution-run";
 import { resolveUserPrincipal, dispatchCommand } from "@/server/source/commands/dispatch";
@@ -260,6 +261,11 @@ describe("B1 runtime persistence survival", () => {
     expect(job.summary?.products).toBe(2);
     expect(job.summary?.suppliers).toBe(1);
     expect(job.summary?.productSupplierRelationships).toBe(2);
+    expect(job.summary?.requirements).toBe(2);
+    expect(job.summary?.autoResolvable).toBe(0);
+    expect(job.summary?.supplierAction).toBe(2);
+    expect(job.summary?.userAction).toBe(0);
+    expect(job.summary?.sourceHasExecutablePlan).toBe(true);
     await firstPool.end();
 
     const secondPool = createPostgresPool(appUrl, "app");
@@ -270,6 +276,9 @@ describe("B1 runtime persistence survival", () => {
     expect(suppliers[0].id).toBe("SUP-001");
     expect(suppliers[0].name).toBe("Northwood Components GmbH");
     expect(state.subjects.filter((s) => s.kind === "PRODUCT" && s.declaredSupplierId === "SUP-001")).toHaveLength(2);
+    const plan = summarizeMissingRequirements(state);
+    expect(resolutionPlanInvariantHolds(plan)).toBe(true);
+    expect(plan).toMatchObject({ missing: 2, automatic: 0, supplierAction: 2, userAction: 0, reviewOrBlocked: 0 });
     await secondPool.end();
   });
 

@@ -3,6 +3,7 @@ import { explainException } from "@/domain/source/copy";
 import type { CaseFilter, EngineState, ResolutionCase, ResolutionCaseState } from "@/domain/source/types";
 import { matchesFilter } from "@/domain/source/queries";
 import { evaluatePilotRun, humanPilotSentences } from "@/domain/source/analytics";
+import { sourceHasExecutablePlan, summarizeMissingRequirements } from "@/domain/source/resolution-plan";
 import type { PersistencePort } from "@/infrastructure/database/ports";
 import { humanTransportLabel } from "@/infrastructure/email/transport";
 import { hasCapability } from "./authorization";
@@ -17,9 +18,9 @@ import { getRuntimeObjectStorage, getSourceEnvironment } from "@/infrastructure/
 import { METRICS, metricInc, logOperational } from "@/infrastructure/observability/metrics";
 
 const DETECTED: ResolutionCaseState[] = ["DETECTED", "RESOLVING_IDENTITY", "SEARCHING_EXISTING_DATA"];
-const RESOLVING: ResolutionCaseState[] = ["ROUTING", "REVIEW_ROUTING", "RESPONSE_RECEIVED", "VALIDATING", "EVIDENCE_REQUIRED", "RENEWAL_REQUIRED"];
+const RESOLVING: ResolutionCaseState[] = ["ROUTING", "RESPONSE_RECEIVED", "VALIDATING", "EVIDENCE_REQUIRED", "RENEWAL_REQUIRED"];
 const WAITING: ResolutionCaseState[] = ["WAITING_RESPONSE", "REQUEST_PENDING", "WAITING_UPSTREAM", "AUTHORIZATION_REQUIRED"];
-const NEEDS_YOU: ResolutionCaseState[] = ["IDENTITY_REVIEW", "CONFLICT", "CONTACT_REQUIRED", "NDA_REQUIRED", "PERMISSION_CHECK"];
+const NEEDS_YOU: ResolutionCaseState[] = ["IDENTITY_REVIEW", "CONFLICT", "CONTACT_REQUIRED", "NDA_REQUIRED", "PERMISSION_CHECK", "REVIEW_ROUTING"];
 const RESOLVED: ResolutionCaseState[] = ["READY", "RETURNED", "MONITORING"];
 
 export interface CaseListItem {
@@ -83,21 +84,23 @@ async function projectDelivery(store: PersistencePort, organisationId: string, s
 export async function getWorkspaceOverview(store: PersistencePort, principal: Principal) {
   const state = await loadTenant(store, principal);
   const cases = state.cases;
-  const missing = cases.filter((c) => !RESOLVED.includes(c.state)).length;
-  const needsYou = cases.filter((c) => NEEDS_YOU.includes(c.state)).length;
-  const waitingSupplier = cases.filter((c) => c.state === "WAITING_RESPONSE").length;
-  const waitingUpstream = cases.filter((c) => c.state === "WAITING_UPSTREAM").length;
+  const plan = summarizeMissingRequirements(state);
   const resolved = cases.filter((c) => RESOLVED.includes(c.state)).length;
   const readyShare = cases.length ? Math.round((resolved / cases.length) * 100) : 0;
   return {
     organisation: { id: principal.organisationId, name: state.tenant.name },
     summary: {
       readyPercent: readyShare,
-      missing,
-      sourceCanResolve: cases.filter((c) => c.state === "AUTHORIZATION_REQUIRED" || c.automationLevel !== "L0").length,
-      waitingOnSuppliers: waitingSupplier + waitingUpstream,
-      needsYou,
+      missing: plan.missing,
+      sourceCanResolve: plan.automatic,
+      waitingOnSuppliers: plan.supplierAction,
+      needsYou: plan.userAction + plan.reviewOrBlocked,
       resolved,
+      automatic: plan.automatic,
+      supplierAction: plan.supplierAction,
+      userAction: plan.userAction,
+      reviewOrBlocked: plan.reviewOrBlocked,
+      sourceHasExecutablePlan: sourceHasExecutablePlan(plan),
     },
     liveCounts: {
       products: new Set(state.requirements.flatMap((r) => r.productIds)).size,

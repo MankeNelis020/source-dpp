@@ -10,6 +10,11 @@ import { mappingConfidence, parseDecimal, stripBom } from "@/domain/source/norma
 import { buildPilotRequirement, PILOT_DATASET_ID, PILOT_DATASET_VERSION, pilotPropertiesForKind } from "@/domain/source/pilot-dataset";
 import { productIdsForSubject } from "@/domain/source/subjects";
 import { capturePilotSnapshot } from "@/domain/source/analytics";
+import {
+  assertResolutionPlanComplete,
+  sourceHasExecutablePlan,
+  summarizeMissingRequirements,
+} from "@/domain/source/resolution-plan";
 import type { ObjectStorage } from "@/infrastructure/storage/port";
 import { getRuntimeObjectStorage } from "@/infrastructure/runtime";
 import { basenameHint, sha256Hex } from "@/infrastructure/storage/files";
@@ -679,7 +684,8 @@ export async function runImportJob(
 
   await store.saveEngine(principal.organisationId, state);
 
-  const planned = state.cases.filter((c) => c.state === "DETECTED" || c.state === "AUTHORIZATION_REQUIRED" || c.state === "SEARCHING_EXISTING_DATA").length;
+  const planSummary = summarizeMissingRequirements(state);
+  assertResolutionPlanComplete(planSummary);
   const productSupplierRelationships = [...new Set(productIds.values())].filter((subjectId) => {
     const subject = state.subjects.find((s) => s.id === subjectId);
     return Boolean(subject?.declaredSupplierId);
@@ -691,9 +697,13 @@ export async function runImportJob(
     relationships: acceptedBom.length,
     productSupplierRelationships,
     materials: acceptedMaterials.length,
-    requirements: generated,
-    autoResolvable: planned,
-    needsAttention: job.reviewCount + job.errorCount + uniqueIdentityReviews.length,
+    requirements: planSummary.missing,
+    autoResolvable: planSummary.automatic,
+    supplierAction: planSummary.supplierAction,
+    userAction: planSummary.userAction,
+    reviewOrBlocked: planSummary.reviewOrBlocked,
+    needsAttention: planSummary.userAction + planSummary.reviewOrBlocked,
+    sourceHasExecutablePlan: sourceHasExecutablePlan(planSummary),
     outreachStarted: false,
     identityReviews: uniqueIdentityReviews.length,
     autoMapped: rawRecords.filter((r) => r.status === "accepted").length,
@@ -709,6 +719,11 @@ export async function runImportJob(
     suppliers: uniqueSupplierCount,
     relationships: acceptedBom.length,
     productSupplierRelationships,
+    requirements: planSummary.missing,
+    automatic: planSummary.automatic,
+    supplierAction: planSummary.supplierAction,
+    userAction: planSummary.userAction,
+    reviewOrBlocked: planSummary.reviewOrBlocked,
   }, now);
   await store.saveImportJob(job);
   return job;

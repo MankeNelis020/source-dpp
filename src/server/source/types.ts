@@ -277,7 +277,11 @@ export interface ImportJob {
     materials?: number;
     requirements: number;
     autoResolvable: number;
+    supplierAction?: number;
+    userAction?: number;
+    reviewOrBlocked?: number;
     needsAttention: number;
+    sourceHasExecutablePlan?: boolean;
     autoMapped?: number;
     reviewRows?: number;
     warningRows?: number;

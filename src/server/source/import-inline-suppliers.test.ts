@@ -89,7 +89,12 @@ describe("combined product CSV supplier identification", () => {
     expect(job.summary?.suppliers).toBe(1);
     expect(job.summary?.productSupplierRelationships).toBe(5);
     expect(job.summary?.relationships).toBe(0);
-    expect(job.summary?.autoResolvable).toBeGreaterThan(0);
+    expect(job.summary?.requirements).toBe(5);
+    expect(job.summary?.autoResolvable).toBe(0);
+    expect(job.summary?.supplierAction).toBe(5);
+    expect(job.summary?.userAction).toBe(0);
+    expect(job.summary?.reviewOrBlocked).toBe(0);
+    expect(job.summary?.sourceHasExecutablePlan).toBe(true);
 
     const state = store.loadEngine(principal.organisationId);
     const suppliers = catalogueSuppliers(state);
@@ -257,6 +262,11 @@ describe("combined product CSV supplier identification", () => {
     expect(job.summary?.products).toBe(2);
     expect(job.summary?.suppliers).toBe(0);
     expect(job.summary?.productSupplierRelationships).toBe(0);
+    expect(job.summary?.requirements).toBe(2);
+    expect(job.summary?.autoResolvable).toBe(0);
+    expect(job.summary?.supplierAction).toBe(0);
+    expect(job.summary?.userAction).toBe(2);
+    expect(job.summary?.sourceHasExecutablePlan).toBe(false);
     const state = store.loadEngine(principal.organisationId);
     expect(catalogueSuppliers(state)).toHaveLength(0);
     expect(state.subjects.filter((s) => s.kind === "PRODUCT")).toHaveLength(2);

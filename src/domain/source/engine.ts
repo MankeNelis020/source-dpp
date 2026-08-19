@@ -229,6 +229,29 @@ function requirementOf(state: EngineState, resolution: ResolutionCase) {
   return state.requirements.find((r) => r.id === resolution.requirementId)!;
 }
 
+function ensureOpenTask(
+  state: EngineState,
+  now: Date,
+  task: {
+    caseId: string;
+    title: string;
+    context: string;
+    recommendedAction: string;
+    ownerLabel: string;
+    kind: EngineState["tasks"][number]["kind"];
+  }
+) {
+  if (state.tasks.some((row) => row.caseId === task.caseId && row.kind === task.kind && row.status === "open" && row.title === task.title)) {
+    return;
+  }
+  state.tasks.push({
+    id: id(state, "task"),
+    status: "open",
+    createdAt: iso(now),
+    ...task,
+  });
+}
+
 function fail(
   state: EngineState,
   resolution: ResolutionCase,
@@ -483,16 +506,52 @@ function openRequirement(
   }
 
   resolution.state = "ROUTING";
-  if (plan.strategy === "alternative_contact" || !resolution.currentActorId) {
-    resolution.state = "REVIEW_ROUTING";
-    resolution.nextAction = plan.reason || "Review routing. Confidence is too low to send.";
-    return done(state, state.events.filter((e) => e.caseId === resolution.id), resolution.id);
+  if (plan.strategy === "alternative_contact") {
+    resolution.state = "CONTACT_REQUIRED";
+    resolution.nextAction = plan.reason;
+    resolution.ownerLabel = "Account owner";
+    ensureOpenTask(state, now, {
+      caseId: resolution.id,
+      title: "This supplier has no working contact yet.",
+      context: plan.reason,
+      recommendedAction: "Add an email SOURCE may use, or mark the contact as do-not-contact.",
+      ownerLabel: "Account owner",
+      kind: "contact",
+    });
+    return done(state, state.events.filter((e) => e.caseId === resolution.id || e.type === "requirement.created"), resolution.id);
   }
 
-  if (plan.strategy === "human_review" || plan.strategy === "explained_unresolved") {
+  if (!resolution.currentActorId || plan.strategy === "human_review") {
     resolution.state = "REVIEW_ROUTING";
+    resolution.nextAction = plan.reason || "We found the missing requirement but don't yet know which supplier is responsible.";
+    ensureOpenTask(state, now, {
+      caseId: resolution.id,
+      title: resolution.currentActorId
+        ? "Review routing before SOURCE contacts a supplier."
+        : "We don't yet know which supplier is responsible.",
+      context: resolution.nextAction,
+      recommendedAction: resolution.currentActorId
+        ? "Confirm the supplier or assign the requirement before outreach."
+        : "Identify the responsible supplier, or keep this as a Needs You item.",
+      ownerLabel: "Identity reviewer",
+      kind: "review",
+    });
+    return done(state, state.events.filter((e) => e.caseId === resolution.id || e.type === "requirement.created"), resolution.id);
+  }
+
+  if (plan.strategy === "explained_unresolved") {
+    resolution.state = "UNRESOLVED";
     resolution.nextAction = plan.reason;
-    return done(state, state.events.filter((e) => e.caseId === resolution.id), resolution.id);
+    resolution.resolutionOutcome = "UNRESOLVED";
+    ensureOpenTask(state, now, {
+      caseId: resolution.id,
+      title: "This requirement is blocked.",
+      context: plan.reason,
+      recommendedAction: "Keep the case visible. Do not pretend it is resolved.",
+      ownerLabel: "Compliance",
+      kind: "review",
+    });
+    return done(state, state.events.filter((e) => e.caseId === resolution.id || e.type === "requirement.created"), resolution.id);
   }
 
   if (command.planOnly) {
