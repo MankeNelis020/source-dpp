@@ -5,6 +5,7 @@ import { hashToken, hashesEqual } from "@/infrastructure/crypto/tokens";
 import type { OutboxRecord, OutboxStatus } from "@/infrastructure/outbox/types";
 import { PORTAL_ALLOWED_DEFAULT, type ImportJob, type ImportJobEvent, type ImportMappingProfile, type ImmutableAuditEvent, type IdentityCommandRecord, type Membership, type Organisation, type OrganisationInvitation, type ProcessedCommand, type SupplierPortalGrant, type UserRecord } from "@/server/source/types";
 import type { EvidenceObject, PersistencePort, SessionRecord, ShareableTrustCandidate, StorageObjectRecord } from "./ports";
+import { normalizeTimestamp, requireTimestamp } from "./timestamps";
 import type { EmailProviderEventRecord, InboundCorrelationRecord, InboundEmailEventRecord, OutboundMessageRecord } from "@/infrastructure/email/transport";
 
 const DEMO_EXPIRY = "2027-08-17T00:00:00.000Z";
@@ -380,7 +381,13 @@ export class MemoryPersistence implements PersistencePort {
     return this.evidence.get(evidenceId);
   }
   saveStorageObject(object: StorageObjectRecord) {
-    this.storageObjects.set(object.id, { ...object });
+    this.storageObjects.set(object.id, {
+      ...object,
+      expiresAt: normalizeTimestamp(object.expiresAt) ?? undefined,
+      deletedAt: normalizeTimestamp(object.deletedAt) ?? undefined,
+      createdAt: requireTimestamp(object.createdAt),
+      finalizedAt: normalizeTimestamp(object.finalizedAt) ?? undefined,
+    });
   }
   getStorageObject(id: string) {
     const row = this.storageObjects.get(id);

@@ -25,6 +25,7 @@ import type {
   ShareableTrustCandidate,
   StorageObjectRecord,
 } from "./ports";
+import { normalizeTimestamp, requireTimestamp, type TimestampInput } from "./timestamps";
 
 type Queryable = Pool | PoolClient;
 
@@ -205,11 +206,11 @@ export class PostgresPersistence implements PersistencePort {
           invitation.emailNormalized,
           invitation.role,
           invitation.tokenHash,
-          invitation.expiresAt,
-          invitation.acceptedAt ?? null,
-          invitation.revokedAt ?? null,
+          requireTimestamp(invitation.expiresAt),
+          normalizeTimestamp(invitation.acceptedAt),
+          normalizeTimestamp(invitation.revokedAt),
           invitation.createdBy,
-          invitation.createdAt,
+          requireTimestamp(invitation.createdAt),
         ]
       );
     });
@@ -388,9 +389,9 @@ export class PostgresPersistence implements PersistencePort {
       allowedCaseIds: row.allowed_case_ids,
       allowedRequirementIds: row.allowed_requirement_ids,
       allowedCommands: row.allowed_commands,
-      expiresAt: row.expires_at,
-      revokedAt: row.revoked_at ?? undefined,
-      createdAt: row.created_at,
+      expiresAt: requireTimestamp(row.expires_at),
+      revokedAt: normalizeTimestamp(row.revoked_at) ?? undefined,
+      createdAt: requireTimestamp(row.created_at),
     })) as SupplierPortalGrant[];
     return mapped.find((grant) => hashesEqual(grant.tokenHash, hash));
   }
@@ -411,9 +412,9 @@ export class PostgresPersistence implements PersistencePort {
           grant.allowedCaseIds,
           grant.allowedRequirementIds,
           grant.allowedCommands,
-          grant.expiresAt,
-          grant.revokedAt ?? null,
-          grant.createdAt,
+          requireTimestamp(grant.expiresAt),
+          normalizeTimestamp(grant.revokedAt),
+          requireTimestamp(grant.createdAt),
         ]
       );
     });
@@ -457,7 +458,7 @@ export class PostgresPersistence implements PersistencePort {
           JSON.stringify(event.publicContext ?? {}),
           event.privateContext ? JSON.stringify(event.privateContext) : null,
           event.protectedReferences ? JSON.stringify(event.protectedReferences) : null,
-          event.createdAt,
+          requireTimestamp(event.createdAt),
         ]
       );
     });
@@ -641,6 +642,7 @@ export class PostgresPersistence implements PersistencePort {
   }
 
   async saveStorageObject(object: StorageObjectRecord) {
+    const timestamps = storageObjectWriteTimestamps(object);
     await this.withTenant(object.organisationId, async (client) => {
       await client.query(
         `INSERT INTO storage_objects (
@@ -670,10 +672,10 @@ export class PostgresPersistence implements PersistencePort {
           object.requirementId ?? null,
           object.evidenceId ?? null,
           object.scanStatus,
-          object.expiresAt ?? null,
-          object.deletedAt ?? null,
-          object.createdAt,
-          object.finalizedAt ?? null,
+          timestamps.expiresAt,
+          timestamps.deletedAt,
+          timestamps.createdAt,
+          timestamps.finalizedAt,
           object.supersedesStorageObjectId ?? null,
         ]
       );
@@ -719,9 +721,9 @@ export class PostgresPersistence implements PersistencePort {
           record.semanticKey,
           JSON.stringify(record.payload),
           record.status,
-          record.availableAt,
+          requireTimestamp(record.availableAt),
           record.attemptCount,
-          record.createdAt,
+          requireTimestamp(record.createdAt),
         ]
       );
       return (result.rowCount ?? 0) > 0;
@@ -901,8 +903,8 @@ export class PostgresPersistence implements PersistencePort {
           record.caseId,
           record.requestId ?? null,
           record.tokenHash,
-          record.createdAt,
-          record.expiresAt,
+          requireTimestamp(record.createdAt),
+          requireTimestamp(record.expiresAt),
         ]
       );
     });
@@ -918,8 +920,8 @@ export class PostgresPersistence implements PersistencePort {
       caseId: String(row.case_id ?? row.caseId),
       requestId: (row.request_id ?? row.requestId) as string | undefined,
       tokenHash: String(row.token_hash ?? row.tokenHash),
-      createdAt: new Date(String(row.created_at ?? row.createdAt)).toISOString(),
-      expiresAt: new Date(String(row.expires_at ?? row.expiresAt)).toISOString(),
+      createdAt: requireTimestamp(row.created_at ?? row.createdAt),
+      expiresAt: requireTimestamp(row.expires_at ?? row.expiresAt),
     };
   }
 
@@ -948,7 +950,7 @@ export class PostgresPersistence implements PersistencePort {
         `INSERT INTO sessions (id, user_id, organisation_id, expires_at, revoked_at, created_at)
          VALUES ($1,$2,$3,$4,$5,$6)
          ON CONFLICT (id) DO UPDATE SET revoked_at = EXCLUDED.revoked_at`,
-        [session.id, session.userId, session.organisationId, session.expiresAt, session.revokedAt ?? null, session.createdAt]
+        [session.id, session.userId, session.organisationId, requireTimestamp(session.expiresAt), normalizeTimestamp(session.revokedAt), requireTimestamp(session.createdAt)]
       );
     });
   }
@@ -958,13 +960,13 @@ export class PostgresPersistence implements PersistencePort {
     const row = rows[0];
     if (!row) return undefined;
     return {
-      id: row.id,
-      userId: row.user_id,
-      organisationId: row.organisation_id,
-      expiresAt: row.expires_at,
-      revokedAt: row.revoked_at ?? undefined,
-      createdAt: row.created_at,
-    } as SessionRecord;
+      id: String(row.id),
+      userId: String(row.user_id ?? row.userId),
+      organisationId: String(row.organisation_id ?? row.organisationId),
+      expiresAt: requireTimestamp(row.expires_at ?? row.expiresAt),
+      revokedAt: normalizeTimestamp(row.revoked_at ?? row.revokedAt) ?? undefined,
+      createdAt: requireTimestamp(row.created_at ?? row.createdAt),
+    };
   }
 
   async revokeSession(id: string, at = new Date()) {
@@ -1006,11 +1008,11 @@ function mapInvitation(row: Record<string, unknown>): OrganisationInvitation {
     emailNormalized: String(row.email_normalized ?? row.emailNormalized),
     role: (row.role as OrganisationInvitation["role"]) ?? "MEMBER",
     tokenHash: String(row.token_hash ?? row.tokenHash),
-    expiresAt: String(row.expires_at ?? row.expiresAt),
-    acceptedAt: (row.accepted_at ?? row.acceptedAt) as string | undefined,
-    revokedAt: (row.revoked_at ?? row.revokedAt) as string | undefined,
+    expiresAt: requireTimestamp(row.expires_at ?? row.expiresAt),
+    acceptedAt: normalizeTimestamp(row.accepted_at ?? row.acceptedAt) ?? undefined,
+    revokedAt: normalizeTimestamp(row.revoked_at ?? row.revokedAt) ?? undefined,
     createdBy: String(row.created_by ?? row.createdBy),
-    createdAt: String(row.created_at ?? row.createdAt),
+    createdAt: requireTimestamp(row.created_at ?? row.createdAt),
   };
 }
 
@@ -1025,8 +1027,8 @@ function mapImportJob(row: Record<string, unknown>): ImportJob {
     warningCount: Number(row.warning_count ?? row.warningCount ?? 0),
     errorCount: Number(row.error_count ?? row.errorCount ?? 0),
     reviewCount: Number(row.review_count ?? row.reviewCount ?? 0),
-    startedAt: (row.started_at ?? row.startedAt) as string | undefined,
-    completedAt: (row.completed_at ?? row.completedAt) as string | undefined,
+    startedAt: normalizeTimestamp(row.started_at ?? row.startedAt) ?? undefined,
+    completedAt: normalizeTimestamp(row.completed_at ?? row.completedAt) ?? undefined,
     mapping: (row.mapping as ImportJob["mapping"]) ?? {},
     summary: (row.summary as ImportJob["summary"]) ?? undefined,
     rawRecords: (row.raw_records ?? row.rawRecords) as ImportJob["rawRecords"],
@@ -1035,7 +1037,21 @@ function mapImportJob(row: Record<string, unknown>): ImportJob {
   };
 }
 
-function mapStorageObject(row: Record<string, unknown>): StorageObjectRecord {
+export function storageObjectWriteTimestamps(object: {
+  createdAt: TimestampInput;
+  expiresAt?: TimestampInput;
+  deletedAt?: TimestampInput;
+  finalizedAt?: TimestampInput;
+}) {
+  return {
+    expiresAt: normalizeTimestamp(object.expiresAt),
+    deletedAt: normalizeTimestamp(object.deletedAt),
+    createdAt: requireTimestamp(object.createdAt),
+    finalizedAt: normalizeTimestamp(object.finalizedAt),
+  };
+}
+
+export function mapStorageObject(row: Record<string, unknown>): StorageObjectRecord {
   return {
     id: String(row.id),
     organisationId: String(row.organisation_id ?? row.organisationId),
@@ -1053,10 +1069,10 @@ function mapStorageObject(row: Record<string, unknown>): StorageObjectRecord {
     requirementId: (row.requirement_id ?? row.requirementId) as string | undefined,
     evidenceId: (row.evidence_id ?? row.evidenceId) as string | undefined,
     scanStatus: String(row.scan_status ?? row.scanStatus ?? "PENDING") as StorageObjectRecord["scanStatus"],
-    expiresAt: (row.expires_at ?? row.expiresAt) as string | undefined,
-    deletedAt: (row.deleted_at ?? row.deletedAt) as string | undefined,
-    createdAt: String(row.created_at ?? row.createdAt),
-    finalizedAt: (row.finalized_at ?? row.finalizedAt) as string | undefined,
+    expiresAt: normalizeTimestamp(row.expires_at ?? row.expiresAt) ?? undefined,
+    deletedAt: normalizeTimestamp(row.deleted_at ?? row.deletedAt) ?? undefined,
+    createdAt: requireTimestamp(row.created_at ?? row.createdAt),
+    finalizedAt: normalizeTimestamp(row.finalized_at ?? row.finalizedAt) ?? undefined,
     supersedesStorageObjectId: (row.supersedes_storage_object_id ?? row.supersedesStorageObjectId) as string | undefined,
   };
 }
@@ -1071,11 +1087,11 @@ function mapOutbox(row: Record<string, unknown>): OutboxRecord {
     semanticKey: String(row.semantic_key ?? row.semanticKey),
     payload: (row.payload as Record<string, unknown>) ?? {},
     status: (row.status as OutboxStatus) ?? "PENDING",
-    availableAt: new Date(String(row.available_at ?? row.availableAt)).toISOString(),
+    availableAt: requireTimestamp(row.available_at ?? row.availableAt),
     attemptCount: Number(row.attempt_count ?? row.attemptCount ?? 0),
     lastError: (row.last_error ?? row.lastError) as string | undefined,
-    createdAt: new Date(String(row.created_at ?? row.createdAt)).toISOString(),
-    processedAt: row.processed_at || row.processedAt ? new Date(String(row.processed_at ?? row.processedAt)).toISOString() : undefined,
+    createdAt: requireTimestamp(row.created_at ?? row.createdAt),
+    processedAt: normalizeTimestamp(row.processed_at ?? row.processedAt) ?? undefined,
   };
 }
 
@@ -1098,22 +1114,12 @@ function mapOutboundMessage(row: Record<string, unknown>): OutboundMessageRecord
     providerMessageId: (row.provider_message_id ?? row.providerMessageId) as string | undefined,
     transportStatus: String(row.transport_status ?? row.transportStatus) as TransportStatus,
     tokenFingerprint: (row.token_fingerprint ?? row.tokenFingerprint) as string | undefined,
-    createdAt: new Date(String(row.created_at ?? row.createdAt)).toISOString(),
-    providerAcceptedAt: row.provider_accepted_at || row.providerAcceptedAt
-      ? new Date(String(row.provider_accepted_at ?? row.providerAcceptedAt)).toISOString()
-      : undefined,
-    deliveredAt: row.delivered_at || row.deliveredAt
-      ? new Date(String(row.delivered_at ?? row.deliveredAt)).toISOString()
-      : undefined,
-    bouncedAt: row.bounced_at || row.bouncedAt
-      ? new Date(String(row.bounced_at ?? row.bouncedAt)).toISOString()
-      : undefined,
-    complainedAt: row.complained_at || row.complainedAt
-      ? new Date(String(row.complained_at ?? row.complainedAt)).toISOString()
-      : undefined,
-    lastProviderEventAt: row.last_provider_event_at || row.lastProviderEventAt
-      ? new Date(String(row.last_provider_event_at ?? row.lastProviderEventAt)).toISOString()
-      : undefined,
+    createdAt: requireTimestamp(row.created_at ?? row.createdAt),
+    providerAcceptedAt: normalizeTimestamp(row.provider_accepted_at ?? row.providerAcceptedAt) ?? undefined,
+    deliveredAt: normalizeTimestamp(row.delivered_at ?? row.deliveredAt) ?? undefined,
+    bouncedAt: normalizeTimestamp(row.bounced_at ?? row.bouncedAt) ?? undefined,
+    complainedAt: normalizeTimestamp(row.complained_at ?? row.complainedAt) ?? undefined,
+    lastProviderEventAt: normalizeTimestamp(row.last_provider_event_at ?? row.lastProviderEventAt) ?? undefined,
     lastError: (row.last_error ?? row.lastError) as string | undefined,
   };
 }
@@ -1127,7 +1133,7 @@ function mapProviderEvent(row: Record<string, unknown>): EmailProviderEventRecor
     providerEventId: String(row.provider_event_id ?? row.providerEventId),
     providerMessageId: (row.provider_message_id ?? row.providerMessageId) as string | undefined,
     eventType: String(row.event_type ?? row.eventType),
-    occurredAt: new Date(String(row.occurred_at ?? row.occurredAt)).toISOString(),
-    processedAt: new Date(String(row.processed_at ?? row.processedAt)).toISOString(),
+    occurredAt: requireTimestamp(row.occurred_at ?? row.occurredAt),
+    processedAt: requireTimestamp(row.processed_at ?? row.processedAt),
   };
 }
