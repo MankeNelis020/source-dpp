@@ -133,7 +133,10 @@ describe("golden path — manufacturer import to supplier response", () => {
     const view = await getSupplierPortalView(store, portal);
     const question = view.questions[0];
     await acceptPortalDisclosure(store, portal, question.id, NOW);
-    const command = portalEvidenceSubmit(question.id, { value: "42" });
+    const command = portalEvidenceSubmit(question.id, {
+      value: "42",
+      evidence: { filename: "recycled-content.pdf" },
+    });
     const first = await dispatchCommand({
       store,
       principal: portal,
