@@ -10,21 +10,20 @@ const getSourceEnvironment = vi.fn();
 const getPersistenceHealth = vi.fn();
 const getPersistence = vi.fn();
 const requireCronSecret = vi.fn();
-const emailConfigurationStatus = vi.fn(() => "configured");
 
 vi.mock("@/infrastructure/runtime", () => ({
-  bootSourceRuntime: (...args: unknown[]) => bootSourceRuntime(...args),
-  getSourceEnvironment: (...args: unknown[]) => getSourceEnvironment(...args),
-  getPersistenceHealth: (...args: unknown[]) => getPersistenceHealth(...args),
-  getPersistence: (...args: unknown[]) => getPersistence(...args),
+  bootSourceRuntime: () => bootSourceRuntime(),
+  getSourceEnvironment: () => getSourceEnvironment(),
+  getPersistenceHealth: () => getPersistenceHealth(),
+  getPersistence: () => getPersistence(),
 }));
 
 vi.mock("@/server/source/cron-auth", () => ({
-  requireCronSecret: (...args: unknown[]) => requireCronSecret(...args),
+  requireCronSecret: (request: Request) => requireCronSecret(request),
 }));
 
 vi.mock("@/infrastructure/email/factory", () => ({
-  emailConfigurationStatus: (...args: unknown[]) => emailConfigurationStatus(...args),
+  emailConfigurationStatus: vi.fn(() => "configured"),
 }));
 
 import { GET } from "@/app/api/internal/health/route";
@@ -57,8 +56,6 @@ describe("GET /api/internal/health", () => {
     getPersistenceHealth.mockReset();
     getPersistence.mockReset();
     requireCronSecret.mockReset();
-    emailConfigurationStatus.mockReset();
-    emailConfigurationStatus.mockReturnValue("configured");
     getSourceEnvironment.mockReturnValue(HEALTHY_ENV);
     getPersistence.mockReturnValue({
       countOutbox: vi.fn(async (status: string) => (status === "PENDING" ? 2 : status === "FAILED" ? 1 : 4)),
