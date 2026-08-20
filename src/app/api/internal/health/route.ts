@@ -1,28 +1,52 @@
 import { jsonError } from "../../source/_lib";
-import { getPersistence, getPersistenceHealth } from "@/infrastructure/runtime";
+import {
+  bootSourceRuntime,
+  getPersistence,
+  getPersistenceHealth,
+  getSourceEnvironment,
+} from "@/infrastructure/runtime";
 import { requireCronSecret } from "@/server/source/cron-auth";
 import { emailConfigurationStatus } from "@/infrastructure/email/factory";
-import { loadSourceEnvironment } from "@/infrastructure/environment/source-environment";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
     requireCronSecret(request);
-    const env = loadSourceEnvironment();
+  } catch (error) {
+    return jsonError(error);
+  }
+
+  try {
+    await bootSourceRuntime();
+    const env = getSourceEnvironment();
     const health = getPersistenceHealth();
+    if (health.database !== "ok") {
+      return Response.json(
+        {
+          database: "error",
+          persistence: env.persistence,
+          storage: health.storage ?? "error",
+          email: emailConfigurationStatus(env),
+        },
+        { status: 503 }
+      );
+    }
     const store = getPersistence();
     const pending = (await store.countOutbox("PENDING")) + (await store.countOutbox("FAILED"));
     const dead = await store.countOutbox("DEAD_LETTER");
     return Response.json({
-      database: health.database,
+      database: "ok",
       persistence: health.persistence,
       storage: health.storage ?? "ok",
       email: emailConfigurationStatus(env),
       outboxBacklog: pending,
       outboxDeadLetter: dead,
     });
-  } catch (error) {
-    return jsonError(error);
+  } catch {
+    return Response.json(
+      { database: "error", persistence: "postgres", storage: "error", email: "unconfigured" },
+      { status: 503 }
+    );
   }
 }
