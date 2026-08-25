@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Check, FileQuestion, Handshake, Search } from "lucide-react";
 import { ClaimCard, SourceLinkButton } from "@/components/source/ui";
 import { Section, SectionHeader } from "@/components/source/knowledge";
 import { SourceJsonLd } from "@/components/source/source-json-ld";
@@ -22,8 +21,6 @@ export const metadata: Metadata = {
     absolute: `${SITE_NAME} — ${HERO_LINE_1} ${HERO_LINE_2}`,
   },
 };
-
-const STAGE_ICONS = [Search, FileQuestion, Handshake, Check] as const;
 
 export default function HomePage() {
   return (
@@ -138,21 +135,17 @@ export default function HomePage() {
             lead="The public illustration below is a manufacturer journey, not a live customer portfolio."
           />
           <ol className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {EVIDENCE_STAGES.map((stage, i) => {
-              const Icon = STAGE_ICONS[i] ?? Search;
-              return (
-                <li key={stage.title} className="border border-ink/8 bg-card p-5">
-                  <p className="font-[family-name:var(--font-plex)] text-[11px] font-medium uppercase tracking-[0.14em] text-ink/55">
-                    0{i + 1}
-                  </p>
-                  <Icon className="mt-3 h-4 w-4 text-ink" strokeWidth={1.5} />
-                  <h3 className="mt-3 font-[family-name:var(--font-space)] text-base tracking-[-0.02em] text-ink">
-                    {stage.title}
-                  </h3>
-                  <p className="mt-2 text-[13px] leading-relaxed text-ink/70">{stage.body}</p>
-                </li>
-              );
-            })}
+            {EVIDENCE_STAGES.map((stage, i) => (
+              <li key={stage.title} className="border border-ink/8 bg-card p-5">
+                <p className="font-[family-name:var(--font-plex)] text-[11px] font-medium uppercase tracking-[0.14em] text-ink/55">
+                  0{i + 1}
+                </p>
+                <h3 className="mt-3 font-[family-name:var(--font-space)] text-base tracking-[-0.02em] text-ink">
+                  {stage.title}
+                </h3>
+                <p className="mt-2 text-[13px] leading-relaxed text-ink/70">{stage.body}</p>
+              </li>
+            ))}
           </ol>
           <div className="mt-10 grid gap-6 lg:grid-cols-2">
             <IdentityDemo />
