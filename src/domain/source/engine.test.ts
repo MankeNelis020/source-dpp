@@ -376,8 +376,9 @@ describe("requirement isolation and delegation", () => {
     const productB = afterUnknown.state.cases.find((item) => item.id === second.caseId)!;
     expect(productA.state).toBe("WAITING_UPSTREAM");
     expect(productA.resolutionOutcome).not.toBe("READY");
-    expect(productB.state).not.toBe("WAITING_UPSTREAM");
-    expect(productB.blockingReason).toBeUndefined();
+    expect(productB.state).toBe("WAITING_RESPONSE");
+    expect(productB.blockingReason).toBe("NO_RESPONSE");
+    expect(productB.blockingReason).not.toBe(productA.blockingReason);
     expect(productB.nextAction).not.toBe(productA.nextAction);
   });
 
