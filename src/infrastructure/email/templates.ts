@@ -1,7 +1,7 @@
 import type { EmailCategory } from "./port";
 import type { EmailTemplateId } from "./transport";
 import type { SupplierReferenceMode } from "@/domain/source/types";
-import { introductionCopy } from "@/domain/source/reference-mode";
+import { DEFAULT_SUPPLIER_REFERENCE_MODE, introductionCopy } from "@/domain/source/reference-mode";
 
 export interface RenderedEmail {
   subject: string;
@@ -170,7 +170,7 @@ export function renderUpstreamForwardEmail(input: {
   portalUrl: string;
   expiresAt: Date;
 }): RenderedEmail {
-  const mode = input.referenceMode ?? (input.hideCustomer ? "NO_REFERENCE" : "FULL_REFERENCE");
+  const mode = input.referenceMode ?? DEFAULT_SUPPLIER_REFERENCE_MODE;
   const intro = introductionCopy({
     mode,
     currentOrganisationName: input.currentOrganisationName,

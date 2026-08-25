@@ -422,6 +422,7 @@ describe("requirement isolation and delegation", () => {
     const handoff = delegated.state.attempts.find((item) => item.method === "colleague_handoff");
     expect(handoff?.parentAttemptId).toBeTruthy();
     expect(handoff?.delegatedFromActorId).toBe("supplier-a");
+    expect(handoff?.referenceMode).toBeUndefined();
     expect(delegated.state.contacts.find((item) => item.email === "alex@a.example")?.primary).toBe(true);
   });
 
@@ -499,5 +500,53 @@ describe("requirement isolation and delegation", () => {
     expect(forwarded.events.some((event) => event.type === "request.forwarded")).toBe(true);
     expect(forwarded.state.cases[0].state).toBe("WAITING_UPSTREAM");
     expect(forwarded.state.cases[0].resolutionOutcome).not.toBe("READY");
+  });
+
+  it("does not let a later hop change an earlier attempt's referenceMode", () => {
+    const opened = applyCommand(
+      withSupplier(),
+      { type: "OPEN_REQUIREMENT", requirement: requirement(), declaredSupplierId: "supplier-a" },
+      NOW
+    );
+    const toMill = applyCommand(
+      opened.state,
+      {
+        type: "FORWARD_UPSTREAM",
+        caseId: opened.caseId!,
+        upstream: {
+          name: "Mill",
+          legalName: "Mill Oy",
+          country: "Finland",
+          email: "mill@example.test",
+        },
+        mode: "on_behalf",
+        referenceMode: "FULL_REFERENCE",
+      },
+      NOW
+    );
+    const mill = toMill.state.actors.find((item) => item.name === "Mill")!;
+    const firstHop = toMill.state.attempts.find((item) => item.actorId === mill.id)!;
+    const toSmelter = applyCommand(
+      toMill.state,
+      {
+        type: "FORWARD_UPSTREAM",
+        caseId: opened.caseId!,
+        upstream: {
+          name: "Smelter",
+          legalName: "Smelter AS",
+          country: "Norway",
+          email: "smelter@example.test",
+        },
+        mode: "confidential",
+        referenceMode: "NO_REFERENCE",
+      },
+      NOW
+    );
+    const stillFirst = toSmelter.state.attempts.find((item) => item.id === firstHop.id)!;
+    const secondHop = toSmelter.state.attempts.find((item) => item.id === toSmelter.state.cases[0].currentAttemptId)!;
+    expect(stillFirst.referenceMode).toBe("FULL_REFERENCE");
+    expect(secondHop.referenceMode).toBe("NO_REFERENCE");
+    expect(secondHop.parentAttemptId).toBe(stillFirst.id);
+    expect(stillFirst.referenceMode).not.toBe(secondHop.referenceMode);
   });
 });
