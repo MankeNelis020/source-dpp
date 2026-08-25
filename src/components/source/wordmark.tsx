@@ -64,7 +64,7 @@ export function SourceWordmark({
       </span>
       {withTagline ? (
         <span className="mt-2 font-[family-name:var(--font-plex)] text-[9px] font-medium uppercase tracking-[0.16em] text-ink/55">
-          Trusted product claims infrastructure
+          Product evidence resolution
         </span>
       ) : null}
     </span>
