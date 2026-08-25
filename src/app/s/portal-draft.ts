@@ -1,5 +1,6 @@
-import type { CannotProvideReason, DisclosureMode, EvidenceReusePolicy, UnknownChoice, UpstreamContactMode } from "@/domain/source";
+import type { CannotProvideReason, DisclosureMode, EvidenceReusePolicy, SupplierReferenceMode, UnknownChoice, UpstreamContactMode } from "@/domain/source";
 import { SUPPLIER_ACTIONS } from "@/domain/source/copy";
+import { DEFAULT_SUPPLIER_REFERENCE_MODE, upstreamModeFromReference } from "@/domain/source/reference-mode";
 
 export type PortalActionId = (typeof SUPPLIER_ACTIONS)[number]["id"];
 
@@ -11,6 +12,7 @@ export interface PortalRequirementDraft {
   value: string;
   unknown: UnknownChoice;
   upstreamMode: UpstreamContactMode;
+  referenceMode: SupplierReferenceMode;
   upstreamName: string;
   upstreamEmail: string;
   upstreamContactName: string;
@@ -37,7 +39,8 @@ export function emptyPortalDraft(): PortalRequirementDraft {
     unknownRoute: null,
     value: "",
     unknown: "ask_supplier",
-    upstreamMode: "confidential",
+    upstreamMode: upstreamModeFromReference(DEFAULT_SUPPLIER_REFERENCE_MODE),
+    referenceMode: DEFAULT_SUPPLIER_REFERENCE_MODE,
     upstreamName: "",
     upstreamEmail: "",
     upstreamContactName: "",

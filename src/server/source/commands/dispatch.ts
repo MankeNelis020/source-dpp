@@ -75,6 +75,9 @@ async function outboxForEvents(args: {
     const currentAttempt = state.attempts.find(
       (item) => item.id === state.cases.find((row) => row.id === caseId)?.currentAttemptId
     );
+    const delegatedFromName = currentAttempt?.delegatedFromActorId
+      ? state.actors.find((actor) => actor.id === currentAttempt.delegatedFromActorId)?.name
+      : undefined;
     const queued = await queueSupplierOutreach({
       store,
       organisationId,
@@ -90,6 +93,8 @@ async function outboxForEvents(args: {
           ? "UPSTREAM"
           : "SUPPLIER_REQUEST",
       preferredContactId: currentAttempt?.contactId,
+      referenceMode: event.type === "request.forwarded" ? currentAttempt?.referenceMode : undefined,
+      currentOrganisationName: event.type === "request.forwarded" ? delegatedFromName : undefined,
     });
     if (queued && (await persistQueuedOutreach(store, queued, now))) {
       rows.push(queued.outbox);

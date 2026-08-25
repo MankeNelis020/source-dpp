@@ -15,6 +15,7 @@ export * from "./cycles";
 export * from "./reuse";
 export * from "./reuse-consent";
 export * from "./engine";
+export * from "./reference-mode";
 export * from "./queries";
 export * from "./seed";
 export * from "./analytics";

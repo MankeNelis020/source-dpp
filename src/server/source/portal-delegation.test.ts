@@ -278,6 +278,35 @@ describe("supplier upstream delegation", () => {
     expect(productB.state).not.toBe("CONTACT_REQUIRED");
   });
 
+  it("defaults upstream introduction to NO_REFERENCE and does not name organisations in the email", async () => {
+    const ctx = await setupTwoProducts();
+    const outcome = await dispatchCommand({
+      store: ctx.store,
+      principal: ctx.portal,
+      envelope: envelope(ctx.portal, {
+        type: "FORWARD_UPSTREAM",
+        caseId: ctx.caseA,
+        upstream: {
+          name: "Mill Oy",
+          legalName: "Mill Oy",
+          country: "Finland",
+          email: "kai@mill.example",
+        },
+        mode: "confidential",
+      }),
+      now: NOW,
+    });
+    if (outcome.status === "error") throw new Error(outcome.message);
+    const state = ctx.store.loadEngine(ctx.orgId);
+    const attempt = state.attempts.find((item) => item.caseId === ctx.caseA && item.method === "upstream_request");
+    expect(attempt?.referenceMode).toBe("NO_REFERENCE");
+    const forwarded = queuedRows(ctx.store, ctx.caseA).find((row) => String(row.semanticKey).includes(":UPSTREAM:"));
+    const blob = `${forwarded?.payload.subject ?? ""}\n${forwarded?.payload.text ?? ""}`;
+    expect(blob).toContain("Product information requested through SOURCE");
+    expect(blob).not.toContain("Acme Manufacturing");
+    expect(blob).not.toContain("Supplier A");
+  });
+
   it("queues an upstream request with email, scopes the grant, and keeps evidence provenance", async () => {
     const ctx = await setupTwoProducts();
     const outcome = await dispatchCommand({
@@ -304,6 +333,8 @@ describe("supplier upstream delegation", () => {
     const forwarded = queuedRows(ctx.store, ctx.caseA).find((row) => String(row.semanticKey).includes(":UPSTREAM:"));
     expect(forwarded?.payload.to).toBe("kai@mill.example");
     expect(forwarded?.payload.caseIds).toEqual([ctx.caseA]);
+    expect(String(forwarded?.payload.text)).toContain("Supplier A asked SOURCE");
+    expect(String(forwarded?.payload.text)).toContain("Acme Manufacturing");
     const grant = ctx.store.portalGrants.find((item) => item.id === forwarded!.payload.portalGrantId);
     expect(grant?.allowedCaseIds).toEqual([ctx.caseA]);
     expect(grant?.allowedCaseIds).not.toContain(ctx.caseB);

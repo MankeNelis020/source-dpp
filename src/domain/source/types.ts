@@ -371,6 +371,8 @@ export type ConflictOutcome =
 
 export type UpstreamContactMode = "on_behalf" | "without_customer" | "confidential";
 
+export type SupplierReferenceMode = "NO_REFERENCE" | "CURRENT_ORGANISATION" | "FULL_REFERENCE";
+
 export type UnknownChoice =
   | "ask_supplier"
   | "assign_colleague"
@@ -489,6 +491,7 @@ export interface ResolutionAttempt {
   forwardedUpstream?: boolean;
   delegatedFromActorId?: string;
   delegatedFromContactId?: string;
+  referenceMode?: SupplierReferenceMode;
   costEstimate: number;
   contactId?: string;
   requestId?: string;
@@ -860,6 +863,7 @@ export type Command =
         contactName?: string;
       };
       mode: UpstreamContactMode;
+      referenceMode?: SupplierReferenceMode;
     }
   | { type: "DECLINE"; caseId: string; reason: DeclineReason; note?: string }
   | {

@@ -5,13 +5,13 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { SourceWordmark } from "@/components/source/wordmark";
 import { EvidenceLine, SourceButton, SourceLabel, StatusPill } from "@/components/source/ui";
 import { SUPPLIER_ACTIONS, SUPPLIER_DISCLOSURE_MODES, SUPPLIER_REUSE_CHOICES } from "@/domain/source/copy";
+import { SUPPLIER_REFERENCE_MODES, upstreamModeFromReference } from "@/domain/source/reference-mode";
 import { uploadSourceFile, usePortalCommand, useSourceQuery } from "@/client/source/api";
 import type {
   CannotProvideReason,
   DisclosureMode,
   EvidenceReusePolicy,
   EvidenceRoute,
-  UpstreamContactMode,
 } from "@/domain/source";
 import {
   clearDraftForCase,
@@ -313,6 +313,7 @@ function SupplierPortal() {
             contactName: draft.upstreamContactName.trim() || undefined,
           },
           mode: draft.upstreamMode,
+          referenceMode: draft.referenceMode,
         });
         const copy = dispatchCopy({
           kind: "upstream",
@@ -834,11 +835,26 @@ function UpstreamFields(props: {
       {!draft.upstreamEmail.trim() && draft.upstreamName.trim() ? (
         <p className="text-[12px] text-[#B26B2C]">Contact details required — request not sent.</p>
       ) : null}
-      <select className="w-full border border-[#101A15]/15 px-3 py-2 text-[13px]" value={draft.upstreamMode} onChange={(e) => onPatch({ upstreamMode: e.target.value as UpstreamContactMode })}>
-        <option value="confidential">Keep my supplier identity protected</option>
-        <option value="on_behalf">Contact them on behalf of my customer</option>
-        <option value="without_customer">Contact them without naming the customer</option>
-      </select>
+      <fieldset className="space-y-2">
+        <legend className="text-[12px]">How may SOURCE introduce this request?</legend>
+        {SUPPLIER_REFERENCE_MODES.map((item) => (
+          <label key={item.id} className="block border border-[#101A15]/10 px-3 py-2 text-[12px]">
+            <input
+              type="radio"
+              className="mr-2"
+              checked={draft.referenceMode === item.id}
+              onChange={() =>
+                onPatch({
+                  referenceMode: item.id,
+                  upstreamMode: upstreamModeFromReference(item.id),
+                })
+              }
+            />
+            {item.label}
+            <span className="mt-1 block text-[#101A15]/55">{item.help}</span>
+          </label>
+        ))}
+      </fieldset>
     </div>
   );
 }

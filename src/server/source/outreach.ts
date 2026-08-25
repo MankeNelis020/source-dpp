@@ -1,7 +1,7 @@
 import { generateBearerToken, hashToken, tokenFingerprint } from "@/infrastructure/crypto/tokens";
 import type { PersistencePort } from "@/infrastructure/database/ports";
 import type { OutboxRecord } from "@/infrastructure/outbox/types";
-import type { EngineState } from "@/domain/source/types";
+import type { EngineState, SupplierReferenceMode } from "@/domain/source/types";
 import { issuePortalGrant } from "@/server/source/portal";
 import { renderEmailByTemplate } from "@/infrastructure/email/templates";
 import type { EmailTemplateId } from "@/infrastructure/email/transport";
@@ -55,6 +55,8 @@ export async function queueSupplierOutreach(args: {
   now: Date;
   templateId?: EmailTemplateId;
   preferredContactId?: string;
+  referenceMode?: SupplierReferenceMode;
+  currentOrganisationName?: string;
 }): Promise<OutboundQueueResult | undefined> {
   const { store, organisationId, organisationName, state, supplierActorId, caseIds, semanticKey, now } = args;
   const uniqueCaseIds = [...new Set(caseIds)];
@@ -79,13 +81,18 @@ export async function queueSupplierOutreach(args: {
     expiresAt: expiresAt.toISOString(),
   });
 
-  const hideCustomer = isConfidentialActor(state, supplierActorId);
+  const hideCustomer =
+    args.referenceMode != null
+      ? args.referenceMode !== "FULL_REFERENCE"
+      : isConfidentialActor(state, supplierActorId);
   const rendered = renderEmailByTemplate(templateId, {
     organisationName,
     itemCount: uniqueCaseIds.length,
     portalUrl: portalUrlForToken(token),
     expiresAt,
     hideCustomer,
+    referenceMode: args.referenceMode,
+    currentOrganisationName: args.currentOrganisationName,
   });
 
   const fromAddress = fromAddressFor(organisationName);

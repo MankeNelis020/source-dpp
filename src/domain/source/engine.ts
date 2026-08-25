@@ -1,5 +1,6 @@
 import { explainException } from "./copy";
 import { wouldCreateCycle } from "./cycles";
+import { resolveSupplierReferenceMode, upstreamModeFromReference } from "./reference-mode";
 import { STANDARD_SUPPLIER_14D, nextPendingStep, upcomingStep } from "./escalation";
 import { resolveIdentity } from "./identity";
 import { IDENTITY_ENGINE_VERSION } from "./identity";
@@ -1187,14 +1188,16 @@ function forwardUpstream(
   }
 
   const requirement = requirementOf(state, resolution);
+  const referenceMode = resolveSupplierReferenceMode(command);
+  const mode = upstreamModeFromReference(referenceMode);
   state.relationships.push({
     id: id(state, "rel"),
     fromActorId: fromId,
     toActorId: upstream.id,
     subjectId: requirement.subjectId,
-    confidentialUpstream: command.mode === "confidential",
-    confidentialDownstream: command.mode === "confidential",
-    hideCustomer: command.mode !== "on_behalf",
+    confidentialUpstream: mode === "confidential",
+    confidentialDownstream: mode === "confidential",
+    hideCustomer: mode !== "on_behalf",
   });
 
   const attempt: ResolutionAttempt = {
@@ -1205,7 +1208,9 @@ function forwardUpstream(
     status: "waiting",
     startedAt: iso(now),
     forwardedUpstream: true,
+    referenceMode,
     costEstimate: 2.4,
+    requestId: resolution.requestId,
   };
 
   const email = workEmail(command.upstream.email);
@@ -1257,10 +1262,11 @@ function forwardUpstream(
       timestamp: iso(now),
       detail: "Upstream organisation recorded. No request was sent because no contact email was provided.",
       payload: {
-        hideCustomer: command.mode !== "on_behalf",
-        confidential: command.mode === "confidential",
+        hideCustomer: mode !== "on_behalf",
+        confidential: mode === "confidential",
         upstreamActorId: upstream.id,
         delegatedFromActorId: fromId,
+        referenceMode,
       },
     });
     return;
@@ -1270,7 +1276,7 @@ function forwardUpstream(
   fail(
     state,
     resolution,
-    command.mode === "confidential" ? "CONFIDENTIAL" : "UPSTREAM_REQUIRED",
+    mode === "confidential" ? "CONFIDENTIAL" : "UPSTREAM_REQUIRED",
     now,
     {
       nextAction: "Wait for the upstream supplier. Original requirement stays the same.",
@@ -1282,15 +1288,16 @@ function forwardUpstream(
     actor: fromId,
     timestamp: iso(now),
     detail:
-      command.mode === "confidential"
+      mode === "confidential"
         ? "Forwarded upstream with identity protected."
         : "Forwarded upstream. Same InformationRequirement.",
     payload: {
-      hideCustomer: command.mode !== "on_behalf",
-      confidential: command.mode === "confidential",
+      hideCustomer: mode !== "on_behalf",
+      confidential: mode === "confidential",
       upstreamActorId: upstream.id,
       delegatedFromActorId: fromId,
       requestQueued: true,
+      referenceMode,
     },
   });
 }

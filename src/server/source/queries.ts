@@ -233,6 +233,7 @@ export async function getCaseDetail(store: PersistencePort, principal: Principal
         parentAttemptId: a.parentAttemptId,
         delegatedFromActorId: a.delegatedFromActorId,
         delegatedFrom: a.delegatedFromActorId ? projectActor(state, a.delegatedFromActorId) : undefined,
+        referenceMode: a.referenceMode,
         startedAt: a.startedAt,
         requestId: a.requestId,
         portalGrantId: a.portalGrantId,

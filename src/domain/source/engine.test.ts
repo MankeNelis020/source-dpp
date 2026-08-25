@@ -179,6 +179,7 @@ describe("acceptance 89 — confidential upstream", () => {
     expect(manufacturerMaySeeActor(forwarded.state, mill)).toBe(false);
     expect(forwarded.state.cases[0].blockingReason).toBe("CONFIDENTIAL");
     expect(forwarded.state.relationships[0].hideCustomer).toBe(true);
+    expect(forwarded.state.attempts.find((item) => item.forwardedUpstream)?.referenceMode).toBe("NO_REFERENCE");
   });
 });
 
@@ -494,6 +495,7 @@ describe("requirement isolation and delegation", () => {
     expect(chain.map((item) => item.actorId)).toEqual(["supplier-a", mill.id]);
     expect(chain[1]?.delegatedFromActorId).toBe("supplier-a");
     expect(chain[1]?.parentAttemptId).toBe(chain[0]?.id);
+    expect(chain[1]?.referenceMode).toBe("FULL_REFERENCE");
     expect(forwarded.events.some((event) => event.type === "request.forwarded")).toBe(true);
     expect(forwarded.state.cases[0].state).toBe("WAITING_UPSTREAM");
     expect(forwarded.state.cases[0].resolutionOutcome).not.toBe("READY");

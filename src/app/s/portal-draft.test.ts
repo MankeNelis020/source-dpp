@@ -32,6 +32,7 @@ describe("supplier portal requirement draft isolation", () => {
     const map = patchDraftForCase({}, "case-a", { action: "unknown" });
     expect(draftForCase(map, "case-b")).toEqual(emptyPortalDraft());
     expect(draftForCase(map, "case-b").action).toBeNull();
+    expect(draftForCase(map, "case-b").referenceMode).toBe("NO_REFERENCE");
   });
 
   it("clears one case without affecting another", () => {
