@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Space_Grotesk, Inter, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
-import { RouteShell } from "@/components/source/route-shell";
+import { SITE_NAME, SITE_URL, SOURCE_DEFINITION } from "@/lib/seo/site";
 
 const space = Space_Grotesk({
   variable: "--font-space",
@@ -22,12 +22,32 @@ const plex = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: {
-    default: "SOURCE — Trusted product claims infrastructure",
-    template: "%s · SOURCE",
+    default: `Product evidence resolution | ${SITE_NAME}`,
+    template: `%s | ${SITE_NAME}`,
   },
-  description:
-    "The evidence layer for product data. Connect your product system. SOURCE resolves what you have, what is missing, what can be trusted and what may be reused.",
+  description: SOURCE_DEFINITION,
+  applicationName: SITE_NAME,
+  authors: [{ name: "SOURCE Research", url: `${SITE_URL}/authors/source-research` }],
+  openGraph: {
+    type: "website",
+    siteName: SITE_NAME,
+    locale: "en_GB",
+  },
+  twitter: {
+    card: "summary_large_image",
+  },
+  verification: process.env.GOOGLE_SITE_VERIFICATION
+    ? { google: process.env.GOOGLE_SITE_VERIFICATION }
+    : undefined,
+  other: process.env.BING_SITE_VERIFICATION
+    ? { "msvalidate.01": process.env.BING_SITE_VERIFICATION }
+    : undefined,
+};
+
+export const viewport = {
+  themeColor: "#EFF2ED",
 };
 
 export default function RootLayout({
@@ -37,12 +57,10 @@ export default function RootLayout({
 }) {
   return (
     <html
-      lang="en"
+      lang="en-GB"
       className={`${space.variable} ${inter.variable} ${plex.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
-        <RouteShell>{children}</RouteShell>
-      </body>
+      <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
 }

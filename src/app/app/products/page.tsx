@@ -40,14 +40,14 @@ export default function ProductsPage() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search product, SKU, GTIN…"
-          className="h-9 min-w-[240px] flex-1 rounded-sm border border-[#101A15]/15 bg-[#FBFCFA] px-3 text-[13px] outline-none"
+          className="h-9 min-w-[240px] flex-1 border border-ink/15 bg-card px-3 text-[13px] outline-none"
         />
         {(["all", "ready", "not"] as const).map((id) => (
           <button
             key={id}
             type="button"
             onClick={() => setReady(id)}
-            className={`rounded-sm px-3 py-1.5 text-[12px] ${ready === id ? "bg-[#101A15] text-[#FBFCFA]" : "bg-[#FBFCFA] text-[#101A15]/70"}`}
+            className={`px-3 py-1.5 text-[12px] ${ready === id ? "bg-ink text-card" : "bg-card text-ink/70"}`}
           >
             {id === "all" ? "All" : id === "ready" ? "Ready" : "Not ready"}
           </button>
@@ -55,7 +55,7 @@ export default function ProductsPage() {
       </div>
       <SourceTable columns={["Product", "SKU", "Supplier", "Identity", "Evidence", "Status"]}>
         {rows.map((p) => (
-          <tr key={p.id} className="border-t border-[#101A15]/8 hover:bg-[#EFF2ED]/80">
+          <tr key={p.id} className="border-t border-ink/8 hover:bg-paper/80">
             <td className="px-4 py-3">
               <Link href={`/app/products/${p.id}`} className="hover:underline">
                 {p.name}

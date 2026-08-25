@@ -19,12 +19,12 @@ export default function IntegrationsPage() {
       />
       <div className="grid gap-3 md:grid-cols-2">
         {CONNECTORS.map((c) => (
-          <article key={c.name} className="border border-[#101A15]/10 bg-[#FBFCFA] p-5">
+          <article key={c.name} className="border border-ink/8 bg-card p-5">
             <div className="flex items-start justify-between gap-3">
               <h2 className="font-[family-name:var(--font-space)] text-[20px]">{c.name}</h2>
               <StatusPill tone={c.status === "connected" ? "signal" : "muted"}>{c.status}</StatusPill>
             </div>
-            <p className="mt-3 font-[family-name:var(--font-plex)] text-[12px] text-[#101A15]/60">
+            <p className="mt-3 font-[family-name:var(--font-plex)] text-[12px] text-ink/60">
               Last sync {c.last}
               <br />
               Objects imported {c.objects}

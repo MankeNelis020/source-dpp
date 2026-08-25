@@ -38,13 +38,13 @@ export default function SettingsPage() {
             key={item}
             type="button"
             onClick={() => setTab(item)}
-            className={`whitespace-nowrap rounded-sm px-3 py-1.5 text-[12px] ${tab === item ? "bg-[#101A15] text-[#FBFCFA]" : "bg-[#FBFCFA] text-[#101A15]/70"}`}
+            className={`whitespace-nowrap px-3 py-1.5 text-[12px] ${tab === item ? "bg-ink text-card" : "bg-card text-ink/70"}`}
           >
             {item}
           </button>
         ))}
       </div>
-      <div className="border border-[#101A15]/10 bg-[#FBFCFA] p-6 text-[13px] leading-relaxed">
+      <div className="border border-ink/8 bg-card p-6 text-[13px] leading-relaxed">
         {tab === "Organisation" ? (
           <div className="space-y-2">
             <Row k="Legal name" v={DEMO_ORG.legalName} />
@@ -58,7 +58,7 @@ export default function SettingsPage() {
             {ROLES.map(([name, body]) => (
               <li key={name}>
                 <div className="font-[family-name:var(--font-space)] text-[16px]">{name}</div>
-                <p className="text-[#101A15]/65">{body}</p>
+                <p className="text-ink/65">{body}</p>
               </li>
             ))}
           </ul>
@@ -84,7 +84,7 @@ export default function SettingsPage() {
           <p>ESPR Aluminium 2027 · required properties versioned. New delegated acts add properties without a database rewrite.</p>
         ) : null}
         {tab === "Members" || tab === "Data policies" || tab === "Permission defaults" ? (
-          <p className="text-[#101A15]/65">
+          <p className="text-ink/65">
             Data belongs to owner_actor_id, not user_id. Offboarding never deletes provenance.
           </p>
         ) : null}
@@ -95,7 +95,7 @@ export default function SettingsPage() {
 
 function Row({ k, v }: { k: string; v: string }) {
   return (
-    <div className="flex justify-between gap-4 border-b border-[#101A15]/8 py-2">
+    <div className="flex justify-between gap-4 border-b border-ink/8 py-2">
       <SourceLabel>{k}</SourceLabel>
       <span>{v}</span>
     </div>

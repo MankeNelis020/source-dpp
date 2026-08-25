@@ -13,7 +13,7 @@ export default function SuppliersPage() {
       />
       <SourceTable columns={["Supplier", "Products", "Missing", "Evidence", "Requests", "Status"]}>
         {DEMO_SUPPLIERS.map((s) => (
-          <tr key={s.id} className="border-t border-[#101A15]/8 hover:bg-[#EFF2ED]/80">
+          <tr key={s.id} className="border-t border-ink/8 hover:bg-paper/80">
             <td className="px-4 py-3">
               <Link href={`/app/suppliers/${s.id}`} className="hover:underline">
                 {s.name}
