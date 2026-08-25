@@ -1,5 +1,7 @@
 import type { EmailCategory } from "./port";
 import type { EmailTemplateId } from "./transport";
+import type { SupplierReferenceMode } from "@/domain/source/types";
+import { DEFAULT_SUPPLIER_REFERENCE_MODE, introductionCopy } from "@/domain/source/reference-mode";
 
 export interface RenderedEmail {
   subject: string;
@@ -161,32 +163,32 @@ export function renderAuthorisationRequestEmail(input: {
 
 export function renderUpstreamForwardEmail(input: {
   organisationName?: string;
+  currentOrganisationName?: string;
   hideCustomer: boolean;
+  referenceMode?: SupplierReferenceMode;
   itemCount: number;
   portalUrl: string;
   expiresAt: Date;
 }): RenderedEmail {
-  const requester = input.hideCustomer || !input.organisationName ? "A manufacturer" : input.organisationName;
+  const mode = input.referenceMode ?? DEFAULT_SUPPLIER_REFERENCE_MODE;
+  const intro = introductionCopy({
+    mode,
+    currentOrganisationName: input.currentOrganisationName,
+    requestingOrganisationName: input.organisationName,
+  });
   const rendered = layout({
-    title: "Product information is needed further upstream",
-    paragraphs: [
-      `${requester} is completing product information with SOURCE.`,
-      "Your customer asked SOURCE to request this from you. This is a new attempt on the same requirement.",
-      itemsLine(input.itemCount),
-      "SOURCE does not expose unrelated customers, catalogues, or supply-chain relationships in this message.",
-    ],
+    title: intro.title,
+    paragraphs: [...intro.paragraphs, itemsLine(input.itemCount)],
     ctaLabel: "Provide information",
     portalUrl: input.portalUrl,
     expiry: expiryLine(input.expiresAt),
     footer: [IDENTITY, "Please use the portal link rather than replying to this email."],
   });
   return {
-    subject: input.hideCustomer
-      ? "Product information requested through SOURCE"
-      : `${requester} needs product information`,
+    subject: intro.subject,
     ...rendered,
     templateId: "UPSTREAM",
-    templateVersion: "v1",
+    templateVersion: "v2",
     category: "SUPPLIER_UPSTREAM",
   };
 }
@@ -199,6 +201,8 @@ export function renderEmailByTemplate(
     portalUrl: string;
     expiresAt: Date;
     hideCustomer?: boolean;
+    referenceMode?: SupplierReferenceMode;
+    currentOrganisationName?: string;
   }
 ): RenderedEmail {
   if (templateId === "REMINDER") return renderSupplierReminderEmail(input);
@@ -206,7 +210,9 @@ export function renderEmailByTemplate(
   if (templateId === "UPSTREAM") {
     return renderUpstreamForwardEmail({
       organisationName: input.organisationName,
+      currentOrganisationName: input.currentOrganisationName,
       hideCustomer: Boolean(input.hideCustomer),
+      referenceMode: input.referenceMode,
       itemCount: input.itemCount,
       portalUrl: input.portalUrl,
       expiresAt: input.expiresAt,

@@ -1,7 +1,7 @@
 import { generateBearerToken, hashToken, tokenFingerprint } from "@/infrastructure/crypto/tokens";
 import type { PersistencePort } from "@/infrastructure/database/ports";
 import type { OutboxRecord } from "@/infrastructure/outbox/types";
-import type { EngineState } from "@/domain/source/types";
+import type { EngineState, SupplierReferenceMode } from "@/domain/source/types";
 import { issuePortalGrant } from "@/server/source/portal";
 import { renderEmailByTemplate } from "@/infrastructure/email/templates";
 import type { EmailTemplateId } from "@/infrastructure/email/transport";
@@ -13,8 +13,24 @@ import { METRICS, metricInc } from "@/infrastructure/observability/metrics";
 
 const GRANT_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
-export function contactEmailForActor(state: EngineState, actorId: string | undefined) {
+export function contactEmailForActor(
+  state: EngineState,
+  actorId: string | undefined,
+  preferredContactId?: string
+) {
   if (!actorId) return undefined;
+  if (preferredContactId) {
+    const preferred = state.contacts.find(
+      (c) =>
+        c.id === preferredContactId &&
+        c.actorId === actorId &&
+        c.valid &&
+        !c.doNotContact &&
+        normalizeEmail(c.email)
+    );
+    const email = preferred ? normalizeEmail(preferred.email) : undefined;
+    if (email) return email;
+  }
   const contacts = state.contacts.filter(
     (c) => c.actorId === actorId && c.valid && !c.doNotContact && normalizeEmail(c.email)
   );
@@ -38,11 +54,14 @@ export async function queueSupplierOutreach(args: {
   semanticKey: string;
   now: Date;
   templateId?: EmailTemplateId;
+  preferredContactId?: string;
+  referenceMode?: SupplierReferenceMode;
+  currentOrganisationName?: string;
 }): Promise<OutboundQueueResult | undefined> {
   const { store, organisationId, organisationName, state, supplierActorId, caseIds, semanticKey, now } = args;
   const uniqueCaseIds = [...new Set(caseIds)];
   if (!uniqueCaseIds.length) return undefined;
-  const to = contactEmailForActor(state, supplierActorId);
+  const to = contactEmailForActor(state, supplierActorId, args.preferredContactId);
   if (!to) return undefined;
 
   const templateId: EmailTemplateId = args.templateId ?? templateFromSemanticKey(semanticKey);
@@ -62,13 +81,18 @@ export async function queueSupplierOutreach(args: {
     expiresAt: expiresAt.toISOString(),
   });
 
-  const hideCustomer = isConfidentialActor(state, supplierActorId);
+  const hideCustomer =
+    args.referenceMode != null
+      ? args.referenceMode !== "FULL_REFERENCE"
+      : isConfidentialActor(state, supplierActorId);
   const rendered = renderEmailByTemplate(templateId, {
     organisationName,
     itemCount: uniqueCaseIds.length,
     portalUrl: portalUrlForToken(token),
     expiresAt,
     hideCustomer,
+    referenceMode: args.referenceMode,
+    currentOrganisationName: args.currentOrganisationName,
   });
 
   const fromAddress = fromAddressFor(organisationName);

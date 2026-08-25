@@ -1,5 +1,6 @@
 import { explainException } from "./copy";
 import { wouldCreateCycle } from "./cycles";
+import { resolveSupplierReferenceMode, upstreamModeFromReference } from "./reference-mode";
 import { STANDARD_SUPPLIER_14D, nextPendingStep, upcomingStep } from "./escalation";
 import { resolveIdentity } from "./identity";
 import { IDENTITY_ENGINE_VERSION } from "./identity";
@@ -66,6 +67,26 @@ export function hydrateEngineState(state: EngineState): EngineState {
   state.cannotProvideResponses ??= [];
   state.reuseConsents ??= [];
   return state;
+}
+
+export function attemptProvenanceChain(state: EngineState, attemptId?: string) {
+  const chain: ResolutionAttempt[] = [];
+  const seen = new Set<string>();
+  let current = attemptId;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    const attempt = state.attempts.find((item) => item.id === current);
+    if (!attempt) break;
+    chain.unshift(attempt);
+    current = attempt.parentAttemptId;
+  }
+  return chain;
+}
+
+function setPrimaryContact(state: EngineState, actorId: string, contactId: string) {
+  for (const item of state.contacts) {
+    if (item.actorId === actorId) item.primary = item.id === contactId;
+  }
 }
 
 export function emptyState(tenant?: { id: string; name: string }): EngineState {
@@ -1055,6 +1076,13 @@ function markWrongContact(
   });
 }
 
+function workEmail(raw: string | undefined): string | undefined {
+  const value = raw?.trim().toLowerCase();
+  if (!value || value.length > 254) return undefined;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return undefined;
+  return value;
+}
+
 function markUnknown(
   state: EngineState,
   caseId: string,
@@ -1075,7 +1103,15 @@ function markUnknown(
   if (choice === "ask_supplier") {
     resolution.state = "WAITING_UPSTREAM";
     fail(state, resolution, "UPSTREAM_REQUIRED", now, {
-      nextAction: "Supplier names who supplies this component.",
+      nextAction: "Name the supplier and a contact email before SOURCE can send a request.",
+    });
+    return;
+  }
+  if (choice === "assign_colleague") {
+    resolution.state = "ROUTING";
+    fail(state, resolution, "UNKNOWN", now, {
+      state: "ROUTING",
+      nextAction: "Assign a colleague with a work email. This does not answer the requirement.",
     });
     return;
   }
@@ -1152,17 +1188,18 @@ function forwardUpstream(
   }
 
   const requirement = requirementOf(state, resolution);
+  const referenceMode = resolveSupplierReferenceMode(command);
+  const mode = upstreamModeFromReference(referenceMode);
   state.relationships.push({
     id: id(state, "rel"),
     fromActorId: fromId,
     toActorId: upstream.id,
     subjectId: requirement.subjectId,
-    confidentialUpstream: command.mode === "confidential",
-    confidentialDownstream: command.mode === "confidential",
-    hideCustomer: command.mode !== "on_behalf",
+    confidentialUpstream: mode === "confidential",
+    confidentialDownstream: mode === "confidential",
+    hideCustomer: mode !== "on_behalf",
   });
 
-  const parent = resolution.currentAttemptId;
   const attempt: ResolutionAttempt = {
     id: id(state, "att"),
     caseId: command.caseId,
@@ -1170,21 +1207,76 @@ function forwardUpstream(
     method: "upstream_request",
     status: "waiting",
     startedAt: iso(now),
-    parentAttemptId: parent,
     forwardedUpstream: true,
+    referenceMode,
     costEstimate: 2.4,
+    requestId: resolution.requestId,
   };
+
+  const email = workEmail(command.upstream.email);
+  if (email) {
+    const existingContact = state.contacts.find((c) => c.actorId === upstream.id && c.email.toLowerCase() === email);
+    const contact: ContactPoint = existingContact ?? {
+      id: id(state, "ct"),
+      actorId: upstream.id,
+      role: "product_data",
+      name: command.upstream.contactName?.trim() || email,
+      email,
+      valid: true,
+      primary: true,
+    };
+    if (!existingContact) state.contacts.push(contact);
+    attempt.contactId = contact.id;
+    setPrimaryContact(state, upstream.id, contact.id);
+  }
+
+  const parent = resolution.currentAttemptId;
+  if (parent) {
+    const previous = state.attempts.find((a) => a.id === parent);
+    if (previous && previous.status === "waiting") previous.status = "forwarded";
+  }
+  attempt.parentAttemptId = parent;
+  attempt.delegatedFromActorId = fromId;
   state.attempts.push(attempt);
   resolution.currentAttemptId = attempt.id;
   resolution.currentActorId = upstream.id;
-  resolution.state = "WAITING_UPSTREAM";
   resolution.version += 1;
   const request = state.requests.find((r) => r.id === resolution.requestId);
-  if (request) request.status = "NEEDS_UPSTREAM";
+  if (request) {
+    request.status = email ? "QUEUED" : "NEEDS_UPSTREAM";
+    request.supplierId = upstream.id;
+    request.supplierName = upstream.name;
+    if (attempt.contactId) request.contactId = attempt.contactId;
+  }
+
+  if (!email) {
+    resolution.state = "CONTACT_REQUIRED";
+    fail(state, resolution, "CONTACT_REQUIRED", now, {
+      state: "CONTACT_REQUIRED",
+      nextAction: "Contact details required — request not sent.",
+    });
+    emit({
+      type: "request.upstream_identified",
+      caseId: command.caseId,
+      actor: fromId,
+      timestamp: iso(now),
+      detail: "Upstream organisation recorded. No request was sent because no contact email was provided.",
+      payload: {
+        hideCustomer: mode !== "on_behalf",
+        confidential: mode === "confidential",
+        upstreamActorId: upstream.id,
+        delegatedFromActorId: fromId,
+        referenceMode,
+      },
+    });
+    return;
+  }
+
+  resolution.state = "WAITING_UPSTREAM";
   fail(
     state,
     resolution,
-    command.mode === "confidential" ? "CONFIDENTIAL" : "UPSTREAM_REQUIRED",
+    mode === "confidential" ? "CONFIDENTIAL" : "UPSTREAM_REQUIRED",
     now,
     {
       nextAction: "Wait for the upstream supplier. Original requirement stays the same.",
@@ -1196,12 +1288,16 @@ function forwardUpstream(
     actor: fromId,
     timestamp: iso(now),
     detail:
-      command.mode === "confidential"
+      mode === "confidential"
         ? "Forwarded upstream with identity protected."
         : "Forwarded upstream. Same InformationRequirement.",
     payload: {
-      hideCustomer: command.mode !== "on_behalf",
-      confidential: command.mode === "confidential",
+      hideCustomer: mode !== "on_behalf",
+      confidential: mode === "confidential",
+      upstreamActorId: upstream.id,
+      delegatedFromActorId: fromId,
+      requestQueued: true,
+      referenceMode,
     },
   });
 }
@@ -1601,6 +1697,7 @@ function upsertEvidenceRecord(
         (command.evidence?.storageObjectId || command.evidenceRoute === "SUPPLIER_ATTESTATION" ? "AVAILABLE" : undefined),
       supersedesEvidenceId: command.evidence?.supersedesEvidenceId,
       uploadedViaPortalGrantId: command.portalGrantId,
+      sourceAttemptId: resolution.currentAttemptId,
       createdAt: iso(now),
       route: command.evidenceRoute,
       disclosureMode,
@@ -1642,6 +1739,7 @@ function upsertEvidenceRecord(
       disclosureMode: disclosureMode ?? "",
       reusePolicy: evidence.reusePolicy ?? "",
       agreementVersion: evidence.agreementVersion ?? "",
+      sourceAttemptId: evidence.sourceAttemptId ?? "",
     },
   });
   return evidence;
@@ -2530,9 +2628,75 @@ function assignColleague(
   now: Date,
   emit: (e: Omit<AuditEvent, "id">) => void
 ) {
-  const created: ContactPoint = { ...contact, id: id(state, "ct"), valid: true };
+  const email = workEmail(contact.email);
+  if (!email) {
+    throw new EngineValidationError("CONTACT_EMAIL_REQUIRED", "Enter a work email so SOURCE can send a scoped request.");
+  }
+  const resolution = caseById(state, caseId);
+  const fromActorId = resolution.currentActorId ?? contact.actorId;
+  if (!fromActorId) {
+    throw new EngineValidationError("CONTACT_EMAIL_REQUIRED", "Enter a work email so SOURCE can send a scoped request.");
+  }
+  const created: ContactPoint = {
+    ...contact,
+    id: id(state, "ct"),
+    actorId: fromActorId,
+    email,
+    name: contact.name.trim() || email,
+    valid: true,
+    primary: true,
+  };
   state.contacts.push(created);
-  changeContact(state, caseId, created.id, now, emit);
+  setPrimaryContact(state, fromActorId, created.id);
+  const parent = resolution.currentAttemptId;
+  if (parent) {
+    const previous = state.attempts.find((a) => a.id === parent);
+    if (previous && previous.status === "waiting") previous.status = "forwarded";
+  }
+  const attempt: ResolutionAttempt = {
+    id: id(state, "att"),
+    caseId,
+    actorId: fromActorId,
+    method: "colleague_handoff",
+    status: "waiting",
+    startedAt: iso(now),
+    parentAttemptId: parent,
+    delegatedFromActorId: fromActorId,
+    delegatedFromContactId: state.requests.find((r) => r.id === resolution.requestId)?.contactId,
+    contactId: created.id,
+    costEstimate: 2.4,
+    requestId: resolution.requestId,
+  };
+  state.attempts.push(attempt);
+  resolution.currentAttemptId = attempt.id;
+  resolution.state = "WAITING_RESPONSE";
+  resolution.nextAction = "Wait for the delegated colleague to answer.";
+  resolution.resolutionOutcome = undefined;
+  resolution.closedAt = undefined;
+  resolution.version += 1;
+  const request = state.requests.find((r) => r.id === resolution.requestId);
+  if (request) {
+    request.contactId = created.id;
+    request.status = "QUEUED";
+    request.lastActivityAt = iso(now);
+  }
+  fail(state, resolution, "NO_RESPONSE", now, {
+    state: "WAITING_RESPONSE",
+    nextAction: "Wait for the delegated colleague to answer.",
+  });
+  emit({
+    type: "request.delegated",
+    caseId,
+    actor: fromActorId,
+    timestamp: iso(now),
+    detail: "Delegated to a colleague. Same requirement. A scoped request will be queued if the email is reachable.",
+    payload: {
+      kind: "colleague",
+      contactId: created.id,
+      delegatedFromActorId: fromActorId,
+      requestQueued: true,
+    },
+  });
 }
 
 function inferRelationKind(parentKind?: string, childKind?: string): SubjectRelationKind {

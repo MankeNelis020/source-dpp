@@ -17,7 +17,7 @@ import { applyProviderDeliveryEvent } from "@/server/source/email-events";
 import { semanticReminderKey } from "@/infrastructure/outbox/types";
 import { EmailProviderError } from "@/infrastructure/email/port";
 import { verifyResendWebhookSignature, signResendWebhookForTests } from "@/infrastructure/email/signature";
-import { renderSupplierRequestEmail } from "@/infrastructure/email/templates";
+import { renderSupplierRequestEmail, renderUpstreamForwardEmail } from "@/infrastructure/email/templates";
 import { createUploadIntent, putUploadBytes, finalizeUpload } from "@/server/source/uploads";
 import { createSharedMemoryObjectStorage } from "@/infrastructure/storage/memory";
 import { acceptPortalDisclosure, portalEvidenceSubmit } from "@/server/source/portal-disclosure-test";
@@ -62,6 +62,20 @@ describe("email templates", () => {
     expect(rendered.text).toContain("Provide information");
     expect(rendered.text).toContain("We need your help with 12 items.");
     expect(rendered.subject).toContain("<Acme & Co>");
+  });
+
+  it("does not name organisations when upstream referenceMode is missing", () => {
+    const rendered = renderUpstreamForwardEmail({
+      organisationName: "Acme Manufacturing B.V.",
+      currentOrganisationName: "Supplier A GmbH",
+      hideCustomer: false,
+      itemCount: 1,
+      portalUrl: "https://app.example/s/tok",
+      expiresAt: new Date("2026-09-01T00:00:00.000Z"),
+    });
+    expect(rendered.subject).toBe("Product information requested through SOURCE");
+    expect(rendered.text).not.toContain("Acme Manufacturing");
+    expect(rendered.text).not.toContain("Supplier A");
   });
 });
 

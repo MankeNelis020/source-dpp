@@ -231,6 +231,12 @@ export async function getCaseDetail(store: PersistencePort, principal: Principal
         status: a.status,
         costEstimate: a.costEstimate,
         parentAttemptId: a.parentAttemptId,
+        delegatedFromActorId: a.delegatedFromActorId,
+        delegatedFrom: a.delegatedFromActorId ? projectActor(state, a.delegatedFromActorId) : undefined,
+        referenceMode: a.referenceMode,
+        startedAt: a.startedAt,
+        requestId: a.requestId,
+        portalGrantId: a.portalGrantId,
         actor: projectActor(state, a.actorId),
       })),
     events: state.events.filter((e) => e.caseId === caseId).map((e) => projectDomainEvent(state, e, "tenant")),
@@ -421,8 +427,26 @@ export async function getSupplierPortalView(store: PersistencePort, principal: P
       acceptedRoutes: policy?.accepted,
       conditionalRoutes: policy?.conditional,
       preferredRoutes: policy?.preferred,
+      requirementId: requirement?.id,
+      subjectId: requirement?.subjectId,
     };
   });
+  const relatedIds = new Set(
+    state.relationships.filter((row) => row.fromActorId === principal.actorId).map((row) => row.toActorId)
+  );
+  const knownUpstream = state.actors
+    .filter((item) => relatedIds.has(item.id) && !item.confidential && !isConfidentialActor(state, item.id))
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      contacts: state.contacts
+        .filter((c) => c.actorId === item.id && c.valid && !c.doNotContact)
+        .map((c) => ({ name: c.name, email: c.email })),
+    }))
+    .filter((item) => item.contacts.length > 0);
+  const ownContacts = state.contacts
+    .filter((c) => c.actorId === principal.actorId && c.valid && !c.doNotContact)
+    .map((c) => ({ name: c.name, email: c.email }));
   return {
     requesterName: state.tenant.name,
     actorId: principal.actorId,
@@ -473,6 +497,8 @@ export async function getSupplierPortalView(store: PersistencePort, principal: P
         }
       : null,
     questions,
+    knownUpstream,
+    ownContacts,
     reuseRequests: state.reuseConsents
       .filter((row) => principal.allowedCaseIds.includes(row.caseId) && row.supplierId === principal.actorId)
       .filter((row) => row.status === "PENDING" || row.status === "APPROVED" || row.status === "DECLINED")

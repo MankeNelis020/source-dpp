@@ -53,17 +53,31 @@ async function outboxForEvents(args: {
       ).length || 1;
       semanticKey = `${caseId}:MANUAL_RESEND:${n}:v1`;
     }
+    if (event.type === "request.delegated") {
+      const n = state.attempts.filter((a) => a.caseId === caseId && a.method === "colleague_handoff").length || 1;
+      semanticKey = `${caseId}:DELEGATE:${n}:v1`;
+    }
     if (event.type === "request.forwarded") {
       const actorId = state.cases.find((c) => c.id === caseId)?.currentActorId;
       if (actorId) semanticKey = `${caseId}:UPSTREAM:${actorId}:v1`;
     }
+    if (event.type === "request.upstream_identified") continue;
     if (!semanticKey) continue;
-    const supplierActorId = request?.supplierId ?? state.cases.find((c) => c.id === caseId)?.currentActorId;
+    const supplierActorId =
+      event.type === "request.forwarded" || event.type === "request.delegated"
+        ? state.cases.find((c) => c.id === caseId)?.currentActorId
+        : request?.supplierId ?? state.cases.find((c) => c.id === caseId)?.currentActorId;
     if (!supplierActorId) continue;
     if (event.type === "AUTO_REMINDER_SENT") {
       const email = state.contacts.find((c) => c.actorId === supplierActorId && c.valid)?.email;
       if (state.contacts.some((c) => c.actorId === supplierActorId && c.email === email && c.doNotContact)) continue;
     }
+    const currentAttempt = state.attempts.find(
+      (item) => item.id === state.cases.find((row) => row.id === caseId)?.currentAttemptId
+    );
+    const delegatedFromName = currentAttempt?.delegatedFromActorId
+      ? state.actors.find((actor) => actor.id === currentAttempt.delegatedFromActorId)?.name
+      : undefined;
     const queued = await queueSupplierOutreach({
       store,
       organisationId,
@@ -73,15 +87,24 @@ async function outboxForEvents(args: {
       caseIds: [caseId],
       semanticKey,
       now,
-      templateId: event.type === "AUTO_REMINDER_SENT" || event.type === "request.contact_changed"
-        ? event.type === "AUTO_REMINDER_SENT"
-          ? "REMINDER"
-          : "SUPPLIER_REQUEST"
+      templateId: event.type === "AUTO_REMINDER_SENT"
+        ? "REMINDER"
         : event.type === "request.forwarded"
           ? "UPSTREAM"
           : "SUPPLIER_REQUEST",
+      preferredContactId: currentAttempt?.contactId,
+      referenceMode: event.type === "request.forwarded" ? currentAttempt?.referenceMode : undefined,
+      currentOrganisationName: event.type === "request.forwarded" ? delegatedFromName : undefined,
     });
-    if (queued && (await persistQueuedOutreach(store, queued, now))) rows.push(queued.outbox);
+    if (queued && (await persistQueuedOutreach(store, queued, now))) {
+      rows.push(queued.outbox);
+      if (currentAttempt && !currentAttempt.portalGrantId) {
+        currentAttempt.portalGrantId = queued.message.portalGrantId;
+      }
+    }
+  }
+  if (rows.some((row) => row.payload.portalGrantId)) {
+    await store.saveEngine(organisationId, state);
   }
   return rows;
 }
