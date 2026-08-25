@@ -316,7 +316,8 @@ export type AttemptMethod =
   | "ai_extraction"
   | "human_review"
   | "procurement_escalation"
-  | "renewal";
+  | "renewal"
+  | "colleague_handoff";
 
 export type AttemptStatus =
   | "open"
@@ -486,9 +487,12 @@ export interface ResolutionAttempt {
   responseType?: string;
   parentAttemptId?: string;
   forwardedUpstream?: boolean;
+  delegatedFromActorId?: string;
+  delegatedFromContactId?: string;
   costEstimate: number;
   contactId?: string;
   requestId?: string;
+  portalGrantId?: string;
 }
 
 export interface ResolutionException {
@@ -563,6 +567,7 @@ export interface EvidenceRecord {
   supersededByEvidenceId?: string;
   uploadedViaPortalGrantId?: string;
   uploadedByPrincipalId?: string;
+  sourceAttemptId?: string;
   createdAt?: string;
   route?: EvidenceRoute;
   disclosureMode?: DisclosureMode;
@@ -846,7 +851,14 @@ export type Command =
   | {
       type: "FORWARD_UPSTREAM";
       caseId: string;
-      upstream: { id?: string; name: string; legalName: string; country: string };
+      upstream: {
+        id?: string;
+        name: string;
+        legalName: string;
+        country: string;
+        email?: string;
+        contactName?: string;
+      };
       mode: UpstreamContactMode;
     }
   | { type: "DECLINE"; caseId: string; reason: DeclineReason; note?: string }

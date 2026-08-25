@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyCommand, emptyState } from "./engine";
+import { applyCommand, attemptProvenanceChain, emptyState, EngineValidationError } from "./engine";
 import { caseReadiness } from "./engine";
 import { resolveIdentity } from "./identity";
 import { wouldCreateCycle } from "./cycles";
@@ -91,7 +91,7 @@ describe("acceptance 86 — ask my supplier", () => {
       {
         type: "FORWARD_UPSTREAM",
         caseId: opened.caseId!,
-        upstream: { name: "Mill", legalName: "Mill Oy", country: "Finland" },
+        upstream: { name: "Mill", legalName: "Mill Oy", country: "Finland", email: "mill@example.test" },
         mode: "on_behalf",
       },
       NOW
@@ -170,7 +170,7 @@ describe("acceptance 89 — confidential upstream", () => {
       {
         type: "FORWARD_UPSTREAM",
         caseId: opened.caseId!,
-        upstream: { id: "mill-b", name: "Mill B", legalName: "Mill B Oy", country: "Finland" },
+        upstream: { id: "mill-b", name: "Mill B", legalName: "Mill B Oy", country: "Finland", email: "millb@example.test" },
         mode: "confidential",
       },
       NOW
@@ -343,5 +343,158 @@ describe("cycle detection", () => {
     );
     expect(cycled.state.cases[0].blockingReason).toBe("CHAIN_CYCLE");
     expect(cycled.state.attempts.filter((a) => a.method === "upstream_request")).toHaveLength(0);
+  });
+});
+
+describe("requirement isolation and delegation", () => {
+  it("keeps Product A unknown routing from preselecting Product B", () => {
+    const first = applyCommand(
+      withSupplier(),
+      { type: "OPEN_REQUIREMENT", requirement: requirement("req-a"), declaredSupplierId: "supplier-a" },
+      NOW
+    );
+    const second = applyCommand(
+      first.state,
+      {
+        type: "OPEN_REQUIREMENT",
+        requirement: {
+          ...requirement("req-b"),
+          subjectId: "OAK-LEG-12",
+          subjectLabel: "Oak Leg",
+          productIds: ["urban-table-02"],
+        },
+        declaredSupplierId: "supplier-a",
+      },
+      NOW
+    );
+    const afterUnknown = applyCommand(
+      second.state,
+      { type: "MARK_UNKNOWN", caseId: first.caseId!, choice: "ask_supplier" },
+      NOW
+    );
+    const productA = afterUnknown.state.cases.find((item) => item.id === first.caseId)!;
+    const productB = afterUnknown.state.cases.find((item) => item.id === second.caseId)!;
+    expect(productA.state).toBe("WAITING_UPSTREAM");
+    expect(productA.resolutionOutcome).not.toBe("READY");
+    expect(productB.state).not.toBe("WAITING_UPSTREAM");
+    expect(productB.blockingReason).toBeUndefined();
+    expect(productB.nextAction).not.toBe(productA.nextAction);
+  });
+
+  it("does not mark I don't know as READY", () => {
+    const opened = applyCommand(
+      withSupplier(),
+      { type: "OPEN_REQUIREMENT", requirement: requirement(), declaredSupplierId: "supplier-a" },
+      NOW
+    );
+    const unknown = applyCommand(
+      opened.state,
+      { type: "MARK_UNKNOWN", caseId: opened.caseId!, choice: "assign_colleague" },
+      NOW
+    );
+    expect(unknown.state.cases[0].state).toBe("ROUTING");
+    expect(unknown.state.cases[0].resolutionOutcome).not.toBe("READY");
+    expect(caseReadiness(unknown.state, opened.caseId!).ready).toBe(false);
+  });
+
+  it("delegates to a colleague without marking READY and keeps attempt lineage", () => {
+    const opened = applyCommand(
+      withSupplier(),
+      { type: "OPEN_REQUIREMENT", requirement: requirement(), declaredSupplierId: "supplier-a" },
+      NOW
+    );
+    const delegated = applyCommand(
+      opened.state,
+      {
+        type: "ASSIGN_COLLEAGUE",
+        caseId: opened.caseId!,
+        contact: { actorId: "supplier-a", role: "compliance", name: "Alex", email: "alex@a.example" },
+      },
+      NOW
+    );
+    const resolution = delegated.state.cases[0];
+    expect(resolution.state).toBe("WAITING_RESPONSE");
+    expect(resolution.resolutionOutcome).not.toBe("READY");
+    expect(caseReadiness(delegated.state, opened.caseId!).ready).toBe(false);
+    expect(delegated.events.some((event) => event.type === "request.delegated")).toBe(true);
+    const handoff = delegated.state.attempts.find((item) => item.method === "colleague_handoff");
+    expect(handoff?.parentAttemptId).toBeTruthy();
+    expect(handoff?.delegatedFromActorId).toBe("supplier-a");
+    expect(delegated.state.contacts.find((item) => item.email === "alex@a.example")?.primary).toBe(true);
+  });
+
+  it("requires a work email before colleague delegation", () => {
+    const opened = applyCommand(
+      withSupplier(),
+      { type: "OPEN_REQUIREMENT", requirement: requirement(), declaredSupplierId: "supplier-a" },
+      NOW
+    );
+    expect(() =>
+      applyCommand(
+        opened.state,
+        {
+          type: "ASSIGN_COLLEAGUE",
+          caseId: opened.caseId!,
+          contact: { actorId: "supplier-a", role: "compliance", name: "Alex", email: "not-an-email" },
+        },
+        NOW
+      )
+    ).toThrow(EngineValidationError);
+  });
+
+  it("records upstream organisation without sending when email is missing", () => {
+    const opened = applyCommand(
+      withSupplier(),
+      { type: "OPEN_REQUIREMENT", requirement: requirement(), declaredSupplierId: "supplier-a" },
+      NOW
+    );
+    const identified = applyCommand(
+      opened.state,
+      {
+        type: "FORWARD_UPSTREAM",
+        caseId: opened.caseId!,
+        upstream: { name: "Mill", legalName: "Mill Oy", country: "Finland" },
+        mode: "on_behalf",
+      },
+      NOW
+    );
+    expect(identified.state.cases[0].state).toBe("CONTACT_REQUIRED");
+    expect(identified.state.cases[0].nextAction).toMatch(/request not sent/i);
+    expect(identified.state.cases[0].resolutionOutcome).not.toBe("READY");
+    expect(identified.events.some((event) => event.type === "request.forwarded")).toBe(false);
+    expect(identified.events.some((event) => event.type === "request.upstream_identified")).toBe(true);
+    expect(identified.state.attempts.some((item) => item.forwardedUpstream && item.parentAttemptId)).toBe(true);
+  });
+
+  it("forwards upstream with email and preserves Manufacturer → Supplier A → Supplier B provenance", () => {
+    const opened = applyCommand(
+      withSupplier(),
+      { type: "OPEN_REQUIREMENT", requirement: requirement(), declaredSupplierId: "supplier-a" },
+      NOW
+    );
+    const forwarded = applyCommand(
+      opened.state,
+      {
+        type: "FORWARD_UPSTREAM",
+        caseId: opened.caseId!,
+        upstream: {
+          name: "Mill",
+          legalName: "Mill Oy",
+          country: "Finland",
+          email: "mill@example.test",
+          contactName: "Kai",
+        },
+        mode: "on_behalf",
+      },
+      NOW
+    );
+    const mill = forwarded.state.actors.find((item) => item.name === "Mill")!;
+    const chain = attemptProvenanceChain(forwarded.state, forwarded.state.cases[0].currentAttemptId);
+    expect(chain.map((item) => item.actorId)).toEqual(["supplier-a", mill.id]);
+    expect(chain[1]?.delegatedFromActorId).toBe("supplier-a");
+    expect(chain[1]?.parentAttemptId).toBe(chain[0]?.id);
+    expect(forwarded.events.some((event) => event.type === "request.forwarded")).toBe(true);
+    expect(forwarded.state.cases[0].state).toBe("WAITING_UPSTREAM");
+    expect(forwarded.state.cases[0].resolutionOutcome).not.toBe("READY");
   });
 });

@@ -13,8 +13,24 @@ import { METRICS, metricInc } from "@/infrastructure/observability/metrics";
 
 const GRANT_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
-export function contactEmailForActor(state: EngineState, actorId: string | undefined) {
+export function contactEmailForActor(
+  state: EngineState,
+  actorId: string | undefined,
+  preferredContactId?: string
+) {
   if (!actorId) return undefined;
+  if (preferredContactId) {
+    const preferred = state.contacts.find(
+      (c) =>
+        c.id === preferredContactId &&
+        c.actorId === actorId &&
+        c.valid &&
+        !c.doNotContact &&
+        normalizeEmail(c.email)
+    );
+    const email = preferred ? normalizeEmail(preferred.email) : undefined;
+    if (email) return email;
+  }
   const contacts = state.contacts.filter(
     (c) => c.actorId === actorId && c.valid && !c.doNotContact && normalizeEmail(c.email)
   );
@@ -38,11 +54,12 @@ export async function queueSupplierOutreach(args: {
   semanticKey: string;
   now: Date;
   templateId?: EmailTemplateId;
+  preferredContactId?: string;
 }): Promise<OutboundQueueResult | undefined> {
   const { store, organisationId, organisationName, state, supplierActorId, caseIds, semanticKey, now } = args;
   const uniqueCaseIds = [...new Set(caseIds)];
   if (!uniqueCaseIds.length) return undefined;
-  const to = contactEmailForActor(state, supplierActorId);
+  const to = contactEmailForActor(state, supplierActorId, args.preferredContactId);
   if (!to) return undefined;
 
   const templateId: EmailTemplateId = args.templateId ?? templateFromSemanticKey(semanticKey);

@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { Suspense, useMemo, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { SourceWordmark } from "@/components/source/wordmark";
 import { EvidenceLine, SourceButton, SourceLabel, StatusPill } from "@/components/source/ui";
 import { SUPPLIER_ACTIONS, SUPPLIER_DISCLOSURE_MODES, SUPPLIER_REUSE_CHOICES } from "@/domain/source/copy";
@@ -11,11 +11,20 @@ import type {
   DisclosureMode,
   EvidenceReusePolicy,
   EvidenceRoute,
-  UnknownChoice,
   UpstreamContactMode,
 } from "@/domain/source";
-
-type ActionId = (typeof SUPPLIER_ACTIONS)[number]["id"];
+import {
+  clearDraftForCase,
+  dispatchCopy,
+  draftForCase,
+  outreachQueued,
+  parsePortalSearch,
+  patchDraftForCase,
+  portalPath,
+  type PortalActionId,
+  type PortalDraftMap,
+  type UnknownRoute,
+} from "../portal-draft";
 
 interface PortalView {
   requesterName: string;
@@ -23,6 +32,8 @@ interface PortalView {
   actorName?: string;
   allowedCommands: string[];
   package?: { products: string[]; requirementLabels: string[] };
+  knownUpstream?: { id: string; name: string; contacts: { name: string; email: string }[] }[];
+  ownContacts?: { name: string; email: string }[];
   disclosure?: {
     terms: {
       agreementId: string;
@@ -65,8 +76,10 @@ interface PortalView {
     productNames?: string[];
     whyRequested?: string;
     submitted?: boolean;
+    requirementId?: string;
+    subjectId?: string;
   }[];
-    reuseRequests?: {
+  reuseRequests?: {
     id: string;
     caseId: string;
     status: string;
@@ -82,7 +95,7 @@ interface PortalView {
   }[];
 }
 
-const ROUTE_BY_ACTION: Partial<Record<ActionId, EvidenceRoute>> = {
+const ROUTE_BY_ACTION: Partial<Record<PortalActionId, EvidenceRoute>> = {
   original: "ORIGINAL_DOCUMENT",
   alternative: "ALTERNATIVE_DOCUMENT",
   attest: "SUPPLIER_ATTESTATION",
@@ -90,72 +103,81 @@ const ROUTE_BY_ACTION: Partial<Record<ActionId, EvidenceRoute>> = {
 };
 
 export default function SupplierPortalPage() {
+  return (
+    <Suspense fallback={<div className="mx-auto min-h-full max-w-lg px-5 py-16 text-[13px] text-[#101A15]/50">Loading…</div>}>
+      <SupplierPortal />
+    </Suspense>
+  );
+}
+
+function SupplierPortal() {
   const params = useParams<{ token: string }>();
   const token = typeof params.token === "string" ? params.token : "";
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const parsed = parsePortalSearch(searchParams);
   const { data, error, errorCode, reload } = useSourceQuery<PortalView>(token ? `/api/portal/${encodeURIComponent(token)}` : null);
   const runCommand = usePortalCommand(token);
   const questions = useMemo(() => data?.questions ?? [], [data?.questions]);
   const openQuestions = useMemo(() => questions.filter((q) => !q.submitted && q.state !== "READY"), [questions]);
   const accepted = Boolean(data?.acceptance?.authorityConfirmed && data?.acceptance?.termsAccepted);
+  const answeredCount = questions.filter((q) => q.submitted || q.state === "READY").length;
 
-  const [step, setStep] = useState<"land" | "protocol" | "list" | "act" | "done">("land");
-  const [caseId, setCaseId] = useState<string | null>(null);
-  const [action, setAction] = useState<ActionId | null>(null);
-  const [value, setValue] = useState("");
-  const [unknown, setUnknown] = useState<UnknownChoice>("ask_supplier");
-  const [upstreamMode, setUpstreamMode] = useState<UpstreamContactMode>("confidential");
-  const [upstreamName, setUpstreamName] = useState("");
-  const [colleague, setColleague] = useState("");
+  const [drafts, setDrafts] = useState<PortalDraftMap>({});
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [uploadState, setUploadState] = useState<string | null>(null);
   const [authorityConfirmed, setAuthorityConfirmed] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [showFullTerms, setShowFullTerms] = useState(false);
+  const [confirmation, setConfirmation] = useState<string | null>(null);
   const pendingReuse = useMemo(
     () => (data?.reuseRequests ?? []).filter((row) => row.status === "PENDING"),
     [data?.reuseRequests]
   );
-  const [reusePolicy, setReusePolicy] = useState<EvidenceReusePolicy>("ASK_FOR_REUSE");
-  const [disclosureMode, setDisclosureMode] = useState<DisclosureMode>("PROTECTED_SOURCE");
-  const [cannotReason, setCannotReason] = useState<CannotProvideReason>("commercially_sensitive");
-  const [attestation, setAttestation] = useState({
-    legalEntity: "",
-    personName: "",
-    role: "",
-    statement: "",
-  });
-  const [supportIds, setSupportIds] = useState<string[]>([]);
-  const [confirmation, setConfirmation] = useState<string | null>(null);
 
+  const step = parsed.view === "terms" ? "protocol" : parsed.view === "request" ? "list" : parsed.view === "requirement" ? "act" : parsed.view === "done" ? "done" : "land";
+  const caseId = parsed.caseId;
   const current = useMemo(
-    () => openQuestions.find((c) => c.id === caseId) ?? openQuestions[0],
-    [openQuestions, caseId]
+    () => questions.find((item) => item.id === caseId) ?? openQuestions.find((item) => item.id === caseId),
+    [questions, openQuestions, caseId]
   );
+  const draft = caseId ? draftForCase(drafts, caseId) : draftForCase({}, "");
+  const progressIndex = Math.max(0, questions.findIndex((item) => item.id === caseId));
 
-  function finish(text: string, extra?: string) {
+  function go(view: "land" | "terms" | "request" | "requirement" | "done", nextCase?: string | null) {
+    if (!token) return;
+    router.push(portalPath(token, view, nextCase));
+  }
+
+  function patch(next: Partial<typeof draft>) {
+    if (!caseId) return;
+    setDrafts((map) => patchDraftForCase(map, caseId, next));
+  }
+
+  function finish(text: string, extra?: string, submittedCaseId?: string) {
     setMessage(text);
     setConfirmation(extra ?? null);
-    setStep("done");
+    if (submittedCaseId) setDrafts((map) => clearDraftForCase(map, submittedCaseId));
+    go("done", submittedCaseId ?? caseId);
     void reload();
   }
 
   async function acceptTerms() {
-    if (!current || busy || !token || !data?.disclosure) return;
+    const first = openQuestions[0];
+    if (!first || busy || !token || !data?.disclosure) return;
     setBusy(true);
     try {
       await runCommand({
         type: "ACCEPT_EVIDENCE_DISCLOSURE",
-        caseId: current.id,
+        caseId: first.id,
         authorityConfirmed,
         termsAccepted,
         agreementId: data.disclosure.terms.agreementId,
         agreementVersion: data.disclosure.terms.version,
         reusePolicy: "REUSE_WITHIN_REQUESTING_ORGANISATION",
       });
-      setReusePolicy("ASK_FOR_REUSE");
-      setStep("list");
+      go("request");
       await reload();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "The terms could not be recorded.");
@@ -175,15 +197,15 @@ export default function SupplierPortalPage() {
         decision,
       });
       if (decision === "DECLINED") {
-        setCaseId(row.caseId);
-        setAction(null);
-        setStep("act");
+        go("requirement", row.caseId);
         setMessage(null);
         await reload();
         return;
       }
       finish(
-        "Reuse authorised for this request. SOURCE will assess whether the evidence is sufficient. Approval does not change how the original file may be disclosed."
+        "Reuse authorised for this request. SOURCE will assess whether the evidence is sufficient. Approval does not change how the original file may be disclosed.",
+        "response received",
+        row.caseId
       );
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "The reuse decision could not be recorded.");
@@ -192,15 +214,22 @@ export default function SupplierPortalPage() {
     }
   }
 
+  const askingSupplier = draft.action === "upstream" || (draft.action === "unknown" && draft.unknownRoute === "ask_supplier");
+  const assigningColleague = draft.action === "colleague" || (draft.action === "unknown" && draft.unknownRoute === "assign_colleague");
+  const matchedUpstream = data?.knownUpstream?.find(
+    (item) => item.name.trim().toLowerCase() === draft.upstreamName.trim().toLowerCase()
+  );
+  const suggestedContact = matchedUpstream?.contacts[0];
+
   async function run() {
     if (!current || busy || !token) return;
     setBusy(true);
     try {
-      const route = action ? ROUTE_BY_ACTION[action] : undefined;
+      const route = draft.action ? ROUTE_BY_ACTION[draft.action] : undefined;
       if (route === "ORIGINAL_DOCUMENT" || route === "ALTERNATIVE_DOCUMENT" || route === "SUPPLIER_ATTESTATION" || route === "CANNOT_PROVIDE") {
         let storageObjectId: string | undefined;
         if (route === "ORIGINAL_DOCUMENT" || route === "ALTERNATIVE_DOCUMENT") {
-          if (!evidenceFile) {
+          if (!draft.evidenceFile) {
             setBusy(false);
             setMessage("Choose a supporting file first.");
             return;
@@ -208,7 +237,7 @@ export default function SupplierPortalPage() {
           setUploadState("Uploading…");
           const stored = await uploadSourceFile({
             purpose: "EVIDENCE",
-            file: evidenceFile,
+            file: draft.evidenceFile,
             caseId: current.id,
             portalToken: token,
           });
@@ -218,25 +247,25 @@ export default function SupplierPortalPage() {
         await runCommand({
           type: "SUBMIT_RESPONSE",
           caseId: current.id,
-          value: route === "SUPPLIER_ATTESTATION" ? attestation.statement : value,
+          value: route === "SUPPLIER_ATTESTATION" ? draft.attestation.statement : draft.value,
           unit: "%",
           evidence:
             route === "ORIGINAL_DOCUMENT" || route === "ALTERNATIVE_DOCUMENT"
-              ? { filename: evidenceFile?.name ?? "upload", storageObjectId }
+              ? { filename: draft.evidenceFile?.name ?? "upload", storageObjectId }
               : undefined,
           permission: "GRANTED",
           evidenceRoute: route,
-          disclosureMode: route === "CANNOT_PROVIDE" ? "CANNOT_DISCLOSE" : disclosureMode,
-          reusePolicy,
-          supportsCaseIds: supportIds.filter((id) => id !== current.id),
-          cannotProvideReason: route === "CANNOT_PROVIDE" ? cannotReason : undefined,
+          disclosureMode: route === "CANNOT_PROVIDE" ? "CANNOT_DISCLOSE" : draft.disclosureMode,
+          reusePolicy: draft.reusePolicy,
+          supportsCaseIds: draft.supportIds.filter((id) => id !== current.id),
+          cannotProvideReason: route === "CANNOT_PROVIDE" ? draft.cannotReason : undefined,
           attestation:
             route === "SUPPLIER_ATTESTATION"
               ? {
-                  legalEntity: attestation.legalEntity,
-                  personName: attestation.personName,
-                  role: attestation.role,
-                  statement: attestation.statement,
+                  legalEntity: draft.attestation.legalEntity,
+                  personName: draft.attestation.personName,
+                  role: draft.attestation.role,
+                  statement: draft.attestation.statement,
                   productIds: current.productNames ?? [],
                   requirementIds: [current.propertyLabel ?? current.id],
                 }
@@ -245,72 +274,105 @@ export default function SupplierPortalPage() {
         const modeLabel =
           route === "CANNOT_PROVIDE"
             ? "cannot disclose"
-            : SUPPLIER_DISCLOSURE_MODES.find((item) => item.id === disclosureMode)?.label ?? disclosureMode;
+            : SUPPLIER_DISCLOSURE_MODES.find((item) => item.id === draft.disclosureMode)?.label ?? draft.disclosureMode;
         finish(
           route === "CANNOT_PROVIDE"
             ? "Recorded. This does not resolve the requirement. SOURCE will keep the gap open."
             : route === "SUPPLIER_ATTESTATION"
               ? "Declaration received. SOURCE will assess whether it is sufficient. A declaration is not automatically proof."
-              : "Evidence received. SOURCE will assess whether it supports the listed requirements.",
-          `${route.replaceAll("_", " ").toLowerCase()} · ${modeLabel}. The original file is not made public by uploading it.`
+              : "Evidence received. SOURCE will assess whether it supports this requirement.",
+          `${route.replaceAll("_", " ").toLowerCase()} · ${modeLabel}. response received`,
+          current.id
         );
         return;
       }
-      if (action === "unknown") {
-        await runCommand({ type: "MARK_UNKNOWN", caseId: current.id, choice: unknown });
-        finish("Recorded. SOURCE will continue with the next owner of this answer.");
+      if (draft.action === "unknown" && draft.unknownRoute === "cannot_determine") {
+        await runCommand({ type: "MARK_UNKNOWN", caseId: current.id, choice: "do_not_have" });
+        const copy = dispatchCopy({ kind: "unknown", queued: false, hasEmail: false, hasOrganisation: false });
+        finish(copy.message, copy.confirmation, current.id);
         return;
       }
-      if (action === "upstream") {
-        if (!upstreamName.trim()) {
+      if (askingSupplier) {
+        if (!draft.upstreamName.trim()) {
           setBusy(false);
-          setMessage("Name the upstream organisation first.");
+          setMessage("Name the supplier organisation first.");
           return;
         }
-        await runCommand({ type: "MARK_UNKNOWN", caseId: current.id, choice: "ask_supplier" });
-        await runCommand({
+        if (draft.action === "unknown") {
+          await runCommand({ type: "MARK_UNKNOWN", caseId: current.id, choice: "ask_supplier" });
+        }
+        const result = await runCommand({
           type: "FORWARD_UPSTREAM",
           caseId: current.id,
-          upstream: { name: upstreamName.trim(), legalName: upstreamName.trim(), country: "Unknown" },
-          mode: upstreamMode,
+          upstream: {
+            id: matchedUpstream?.id,
+            name: draft.upstreamName.trim(),
+            legalName: draft.upstreamName.trim(),
+            country: "Unknown",
+            email: draft.upstreamEmail.trim() || undefined,
+            contactName: draft.upstreamContactName.trim() || undefined,
+          },
+          mode: draft.upstreamMode,
         });
-        finish(
-          upstreamMode === "confidential"
-            ? "Your customer will not see this upstream identity. The original request stays the same."
-            : "SOURCE will ask your supplier. This continues the same request."
-        );
+        const copy = dispatchCopy({
+          kind: "upstream",
+          queued: outreachQueued(result),
+          hasEmail: Boolean(draft.upstreamEmail.trim()),
+          hasOrganisation: true,
+        });
+        finish(copy.message, copy.confirmation, current.id);
         return;
       }
-      if (action === "colleague") {
-        if (!colleague.trim()) {
+      if (assigningColleague) {
+        if (!draft.colleagueEmail.trim()) {
           setBusy(false);
-          setMessage("Enter a colleague email first.");
+          setMessage("Enter a work email first.");
           return;
         }
-        await runCommand({
+        if (draft.action === "unknown") {
+          await runCommand({ type: "MARK_UNKNOWN", caseId: current.id, choice: "assign_colleague" });
+        }
+        const result = await runCommand({
           type: "ASSIGN_COLLEAGUE",
           caseId: current.id,
-          contact: { actorId: data?.actorId ?? "", role: "compliance", name: "Colleague", email: colleague.trim() },
+          contact: {
+            actorId: data?.actorId ?? "",
+            role: "compliance",
+            name: draft.colleagueName.trim() || "Colleague",
+            email: draft.colleagueEmail.trim(),
+          },
         });
-        finish("The same scoped request was forwarded. You remain in the history.");
+        const copy = dispatchCopy({
+          kind: "colleague",
+          queued: outreachQueued(result),
+          hasEmail: true,
+          hasOrganisation: false,
+        });
+        finish(copy.message, copy.confirmation, current.id);
         return;
       }
-      if (action === "wrong") {
-        if (!colleague.trim()) {
+      if (draft.action === "wrong") {
+        if (!draft.colleagueEmail.trim()) {
           setBusy(false);
           setMessage("Enter a better contact email first.");
           return;
         }
-        await runCommand({
+        const result = await runCommand({
           type: "MARK_WRONG_CONTACT",
           caseId: current.id,
           mode: "provide_contact",
-          contact: { role: "compliance", name: "Colleague", email: colleague.trim() },
+          contact: { role: "compliance", name: draft.colleagueName.trim() || "Colleague", email: draft.colleagueEmail.trim() },
         });
-        finish("Thank you. SOURCE will send the same request to the new person.");
+        const copy = dispatchCopy({
+          kind: "colleague",
+          queued: outreachQueued(result),
+          hasEmail: true,
+          hasOrganisation: false,
+        });
+        finish(copy.message, copy.confirmation, current.id);
       }
     } catch (err) {
-      finish(err instanceof Error ? err.message : "The request could not be completed.");
+      setMessage(err instanceof Error ? err.message : "The request could not be completed.");
     } finally {
       setBusy(false);
     }
@@ -354,6 +416,11 @@ export default function SupplierPortalPage() {
   }
 
   const terms = data?.disclosure?.terms;
+  const canSubmit =
+    Boolean(draft.action) &&
+    (draft.action !== "unknown" || Boolean(draft.unknownRoute)) &&
+    (!askingSupplier || Boolean(draft.upstreamName.trim())) &&
+    (!assigningColleague || Boolean(draft.colleagueEmail.trim()));
 
   return (
     <div className="mx-auto min-h-full max-w-lg px-5 py-16">
@@ -371,7 +438,7 @@ export default function SupplierPortalPage() {
             Before you share anything, SOURCE explains why the evidence is needed, who will receive the result and how
             your source material will be used. You choose how the evidence may be disclosed.
           </p>
-          <SourceButton className="mt-8" onClick={() => setStep(accepted ? "list" : "protocol")}>
+          <SourceButton className="mt-8" onClick={() => go(accepted ? "request" : "terms")}>
             Continue
           </SourceButton>
         </>
@@ -445,16 +512,7 @@ export default function SupplierPortalPage() {
             <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap border border-[#101A15]/10 bg-[#FBFCFA] p-3 text-[12px] leading-relaxed">
               {terms.fullText}
             </pre>
-          ) : (
-            <div className="mt-3 space-y-3">
-              {terms.sections.map((section) => (
-                <div key={section.heading}>
-                  <div className="text-[12px] font-medium">{section.heading}</div>
-                  <p className="mt-1 text-[12px] text-[#101A15]/70">{section.body}</p>
-                </div>
-              ))}
-            </div>
-          )}
+          ) : null}
           <label className="mt-4 flex items-start gap-2 text-[13px]">
             <input type="checkbox" checked={authorityConfirmed} onChange={(e) => setAuthorityConfirmed(e.target.checked)} />
             <span>I confirm that I am authorised to provide this information on behalf of my organisation.</span>
@@ -476,6 +534,11 @@ export default function SupplierPortalPage() {
           <h1 className="mt-2 font-[family-name:var(--font-space)] text-[24px] tracking-[-0.02em]">
             What {data?.requesterName ?? "the manufacturer"} still needs
           </h1>
+          {questions.length ? (
+            <p className="mt-2 text-[13px] text-[#101A15]/55">
+              {answeredCount} of {questions.length}
+            </p>
+          ) : null}
           {pendingReuse.length ? (
             <div className="mt-6 space-y-4">
               {pendingReuse.map((row) => (
@@ -494,11 +557,7 @@ export default function SupplierPortalPage() {
                 <button
                   type="button"
                   className="w-full border border-[#101A15]/10 bg-[#FBFCFA] px-4 py-3 text-left"
-                  onClick={() => {
-                    setCaseId(item.id);
-                    setSupportIds([]);
-                    setStep("act");
-                  }}
+                  onClick={() => go("requirement", item.id)}
                 >
                   <div className="text-[14.5px]">{item.propertyLabel}</div>
                   <SourceLabel className="mt-1 block">{item.subjectLabel}</SourceLabel>
@@ -512,9 +571,26 @@ export default function SupplierPortalPage() {
         </>
       ) : null}
 
+      {step === "act" && !current ? (
+        <>
+          <button type="button" className="mt-8 text-[13px] text-[#0B6E50]" onClick={() => go("request")}>
+            ← Back to request
+          </button>
+          <p className="mt-6 text-[13px] text-[#101A15]/65">This requirement is not on this request.</p>
+        </>
+      ) : null}
+
       {step === "act" && current ? (
         <>
-          <SourceLabel className="mt-10">{data?.requesterName}</SourceLabel>
+          <button type="button" className="mt-8 text-[13px] text-[#0B6E50]" onClick={() => go("request")}>
+            ← Back to request
+          </button>
+          {questions.length ? (
+            <p className="mt-3 text-[12px] text-[#101A15]/55">
+              {progressIndex + 1} of {questions.length}
+            </p>
+          ) : null}
+          <SourceLabel className="mt-4">{data?.requesterName}</SourceLabel>
           <h1 className="mt-2 font-[family-name:var(--font-space)] text-[24px]">{current.propertyLabel}</h1>
           <p className="mt-2 text-[13px] text-[#101A15]/65">{current.subjectLabel}</p>
           {current.productNames?.length ? (
@@ -536,8 +612,8 @@ export default function SupplierPortalPage() {
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setAction(item.id)}
-                className={`border px-3 py-2 text-left text-[13px] ${action === item.id ? "border-[#0B6E50] bg-[#FBFCFA]" : "border-[#101A15]/10"}`}
+                onClick={() => patch({ action: item.id, unknownRoute: item.id === "unknown" ? null : draft.unknownRoute })}
+                className={`border px-3 py-2 text-left text-[13px] ${draft.action === item.id ? "border-[#0B6E50] bg-[#FBFCFA]" : "border-[#101A15]/10"}`}
               >
                 {item.label}
                 {"recommended" in item && item.recommended ? (
@@ -546,123 +622,21 @@ export default function SupplierPortalPage() {
               </button>
             ))}
           </div>
-          {action === "original" || action === "alternative" || action === "attest" ? (
-            <div className="mt-6 space-y-3">
-              {action !== "attest" ? (
-                <label className="block text-[12px]">
-                  Relevant value or claim, if known
-                  <input className="mt-1 w-full border border-[#101A15]/15 px-3 py-2" value={value} onChange={(e) => setValue(e.target.value)} />
-                </label>
-              ) : (
-                <>
-                  <input
-                    className="w-full border border-[#101A15]/15 px-3 py-2 text-[13px]"
-                    placeholder="Legal entity"
-                    value={attestation.legalEntity}
-                    onChange={(e) => setAttestation((row) => ({ ...row, legalEntity: e.target.value }))}
-                  />
-                  <input
-                    className="w-full border border-[#101A15]/15 px-3 py-2 text-[13px]"
-                    placeholder="Your name"
-                    value={attestation.personName}
-                    onChange={(e) => setAttestation((row) => ({ ...row, personName: e.target.value }))}
-                  />
-                  <input
-                    className="w-full border border-[#101A15]/15 px-3 py-2 text-[13px]"
-                    placeholder="Role / function"
-                    value={attestation.role}
-                    onChange={(e) => setAttestation((row) => ({ ...row, role: e.target.value }))}
-                  />
-                  <textarea
-                    className="w-full border border-[#101A15]/15 px-3 py-2 text-[13px]"
-                    placeholder="Exact statement"
-                    rows={4}
-                    value={attestation.statement}
-                    onChange={(e) => setAttestation((row) => ({ ...row, statement: e.target.value }))}
-                  />
-                </>
-              )}
-              {action === "original" || action === "alternative" ? (
-                <label className="block text-[12px]">
-                  {action === "original" ? "Upload original supporting evidence" : "Upload alternative evidence"}
-                  <input
-                    className="mt-1 block w-full"
-                    type="file"
-                    accept=".pdf,.csv,.png,.jpg,.jpeg,application/pdf,text/csv,image/png,image/jpeg"
-                    onChange={(event) => setEvidenceFile(event.target.files?.[0] ?? null)}
-                  />
-                  <span className="mt-1 block text-[12px] text-[#101A15]/55">
-                    SOURCE stores the original privately and assesses whether it is sufficient. Uploading does not make the file public.
-                  </span>
-                  {uploadState ? <span className="mt-1 block">{uploadState}</span> : null}
-                </label>
-              ) : null}
-              <fieldset className="space-y-2">
-                <legend className="text-[12px]">How may this evidence be disclosed?</legend>
-                {SUPPLIER_DISCLOSURE_MODES.map((item) => (
-                  <label key={item.id} className="block border border-[#101A15]/10 px-3 py-2 text-[12px]">
-                    <input
-                      type="radio"
-                      className="mr-2"
-                      checked={disclosureMode === item.id}
-                      onChange={() => setDisclosureMode(item.id)}
-                    />
-                    {item.label}
-                    <span className="mt-1 block text-[#101A15]/55">{item.help}</span>
-                  </label>
-                ))}
-              </fieldset>
-              <fieldset className="space-y-2">
-                <legend className="text-[12px]">Can SOURCE reuse this evidence if it appears relevant later?</legend>
-                <p className="text-[12px] text-[#101A15]/55">
-                  This evidence may also be relevant to other products or future information requests.
-                </p>
-                {SUPPLIER_REUSE_CHOICES.map((item) => (
-                  <label key={item.id} className="block border border-[#101A15]/10 px-3 py-2 text-[12px]">
-                    <input
-                      type="radio"
-                      className="mr-2"
-                      checked={reusePolicy === item.id}
-                      onChange={() => setReusePolicy(item.id)}
-                    />
-                    {item.label}
-                    <span className="mt-1 block text-[#101A15]/55">
-                      {item.id === "REUSE_WITHIN_REQUESTING_ORGANISATION"
-                        ? `SOURCE may reuse this evidence for compatible requests from ${data?.requesterName ?? "this organisation"} without asking again.`
-                        : item.help}
-                    </span>
-                  </label>
-                ))}
-              </fieldset>
-              {openQuestions.length > 1 ? (
-                <fieldset className="space-y-1">
-                  <legend className="text-[12px]">This evidence also supports</legend>
-                  {openQuestions
-                    .filter((item) => item.id !== current.id)
-                    .map((item) => (
-                      <label key={item.id} className="block text-[12px]">
-                        <input
-                          type="checkbox"
-                          className="mr-2"
-                          checked={supportIds.includes(item.id)}
-                          onChange={(event) =>
-                            setSupportIds((ids) =>
-                              event.target.checked ? [...ids, item.id] : ids.filter((id) => id !== item.id)
-                            )
-                          }
-                        />
-                        {item.propertyLabel} · {item.subjectLabel}
-                      </label>
-                    ))}
-                </fieldset>
-              ) : null}
-            </div>
+          {draft.action === "original" || draft.action === "alternative" || draft.action === "attest" ? (
+            <EvidenceFields
+              draft={draft}
+              requesterName={data?.requesterName}
+              openQuestions={openQuestions}
+              currentId={current.id}
+              uploadState={uploadState}
+              onPatch={patch}
+            />
           ) : null}
-          {action === "cannot" ? (
+          {draft.action === "cannot" ? (
             <select
               className="mt-6 w-full border border-[#101A15]/15 px-3 py-2 text-[13px]"
-              value={cannotReason}
-              onChange={(e) => setCannotReason(e.target.value as CannotProvideReason)}
+              value={draft.cannotReason}
+              onChange={(e) => patch({ cannotReason: e.target.value as CannotProvideReason })}
             >
               <option value="confidentiality">Confidentiality</option>
               <option value="commercially_sensitive">Commercially sensitive</option>
@@ -673,39 +647,45 @@ export default function SupplierPortalPage() {
               <option value="other">Other</option>
             </select>
           ) : null}
-          {action === "unknown" ? (
-            <select className="mt-6 w-full border border-[#101A15]/15 px-3 py-2 text-[13px]" value={unknown} onChange={(e) => setUnknown(e.target.value as UnknownChoice)}>
-              <option value="ask_supplier">Ask my supplier</option>
-              <option value="assign_colleague">Assign a colleague</option>
-              <option value="do_not_have">We do not have this</option>
-              <option value="does_not_exist">This does not exist</option>
-            </select>
-          ) : null}
-          {action === "upstream" ? (
-            <div className="mt-6 space-y-3">
-              <input
-                className="w-full border border-[#101A15]/15 px-3 py-2 text-[13px]"
-                placeholder="Upstream organisation name"
-                value={upstreamName}
-                onChange={(e) => setUpstreamName(e.target.value)}
-              />
-              <select className="w-full border border-[#101A15]/15 px-3 py-2 text-[13px]" value={upstreamMode} onChange={(e) => setUpstreamMode(e.target.value as UpstreamContactMode)}>
-                <option value="confidential">Keep my supplier identity protected</option>
-                <option value="on_behalf">Contact them on behalf of my customer</option>
-                <option value="without_customer">Contact them without naming the customer</option>
-              </select>
+          {draft.action === "unknown" ? (
+            <div className="mt-6 space-y-2">
+              <p className="text-[13px] text-[#101A15]/70">
+                This does not answer the requirement. Choose the next owner for this product only.
+              </p>
+              {([
+                ["ask_supplier", "Ask my supplier"],
+                ["assign_colleague", "Assign colleague"],
+                ["cannot_determine", "I cannot determine this"],
+              ] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`block w-full border px-3 py-2 text-left text-[13px] ${draft.unknownRoute === id ? "border-[#0B6E50] bg-[#FBFCFA]" : "border-[#101A15]/10"}`}
+                  onClick={() => patch({ unknownRoute: id as UnknownRoute })}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           ) : null}
-          {action === "colleague" || action === "wrong" ? (
-            <input
-              className="mt-6 w-full border border-[#101A15]/15 px-3 py-2 text-[13px]"
-              placeholder="colleague@example.com"
-              value={colleague}
-              onChange={(e) => setColleague(e.target.value)}
+          {askingSupplier ? (
+            <UpstreamFields
+              draft={draft}
+              suggested={suggestedContact}
+              suggestedOrg={matchedUpstream?.name}
+              onPatch={patch}
+            />
+          ) : null}
+          {assigningColleague || draft.action === "wrong" ? (
+            <ColleagueFields
+              draft={draft}
+              ownContacts={data?.ownContacts}
+              wrongPerson={draft.action === "wrong"}
+              onPatch={patch}
             />
           ) : null}
           {message && step === "act" ? <p className="mt-3 text-[13px] text-[#B26B2C]">{message}</p> : null}
-          <SourceButton className="mt-8" onClick={() => void run()} disabled={!action || busy}>
+          <SourceButton className="mt-8" onClick={() => void run()} disabled={!canSubmit || busy}>
             Submit
           </SourceButton>
         </>
@@ -718,12 +698,178 @@ export default function SupplierPortalPage() {
           <p className="mt-4 text-[14.5px] leading-relaxed text-[#101A15]/75">{message}</p>
           {confirmation ? <p className="mt-2 text-[13px] text-[#101A15]/65">{confirmation}</p> : null}
           <StatusPill tone="signal">Same request · SOURCE continues if more is needed</StatusPill>
-          {openQuestions.length > 0 ? (
-            <SourceButton className="mt-8" onClick={() => setStep("list")}>
-              Back to request
-            </SourceButton>
-          ) : null}
+          <SourceButton className="mt-8" onClick={() => go("request")}>
+            ← Back to request
+          </SourceButton>
         </>
+      ) : null}
+    </div>
+  );
+}
+
+function EvidenceFields(props: {
+  draft: ReturnType<typeof draftForCase>;
+  requesterName?: string;
+  openQuestions: PortalView["questions"];
+  currentId: string;
+  uploadState: string | null;
+  onPatch: (patch: Partial<ReturnType<typeof draftForCase>>) => void;
+}) {
+  const { draft, onPatch } = props;
+  return (
+    <div className="mt-6 space-y-3">
+      {draft.action !== "attest" ? (
+        <label className="block text-[12px]">
+          Relevant value or claim, if known
+          <input className="mt-1 w-full border border-[#101A15]/15 px-3 py-2" value={draft.value} onChange={(e) => onPatch({ value: e.target.value })} />
+        </label>
+      ) : (
+        <>
+          <input className="w-full border border-[#101A15]/15 px-3 py-2 text-[13px]" placeholder="Legal entity" value={draft.attestation.legalEntity} onChange={(e) => onPatch({ attestation: { ...draft.attestation, legalEntity: e.target.value } })} />
+          <input className="w-full border border-[#101A15]/15 px-3 py-2 text-[13px]" placeholder="Your name" value={draft.attestation.personName} onChange={(e) => onPatch({ attestation: { ...draft.attestation, personName: e.target.value } })} />
+          <input className="w-full border border-[#101A15]/15 px-3 py-2 text-[13px]" placeholder="Role / function" value={draft.attestation.role} onChange={(e) => onPatch({ attestation: { ...draft.attestation, role: e.target.value } })} />
+          <textarea className="w-full border border-[#101A15]/15 px-3 py-2 text-[13px]" placeholder="Exact statement" rows={4} value={draft.attestation.statement} onChange={(e) => onPatch({ attestation: { ...draft.attestation, statement: e.target.value } })} />
+        </>
+      )}
+      {draft.action === "original" || draft.action === "alternative" ? (
+        <label className="block text-[12px]">
+          {draft.action === "original" ? "Upload original supporting evidence" : "Upload alternative evidence"}
+          <input
+            className="mt-1 block w-full"
+            type="file"
+            accept=".pdf,.csv,.png,.jpg,.jpeg,application/pdf,text/csv,image/png,image/jpeg"
+            onChange={(event) => onPatch({ evidenceFile: event.target.files?.[0] ?? null })}
+          />
+          <span className="mt-1 block text-[12px] text-[#101A15]/55">
+            SOURCE stores the original privately and assesses whether it is sufficient. Uploading does not make the file public.
+          </span>
+          {props.uploadState ? <span className="mt-1 block">{props.uploadState}</span> : null}
+        </label>
+      ) : null}
+      <fieldset className="space-y-2">
+        <legend className="text-[12px]">How may this evidence be disclosed?</legend>
+        {SUPPLIER_DISCLOSURE_MODES.map((item) => (
+          <label key={item.id} className="block border border-[#101A15]/10 px-3 py-2 text-[12px]">
+            <input type="radio" className="mr-2" checked={draft.disclosureMode === item.id} onChange={() => onPatch({ disclosureMode: item.id as DisclosureMode })} />
+            {item.label}
+            <span className="mt-1 block text-[#101A15]/55">{item.help}</span>
+          </label>
+        ))}
+      </fieldset>
+      <fieldset className="space-y-2">
+        <legend className="text-[12px]">Can SOURCE reuse this evidence if it appears relevant later?</legend>
+        {SUPPLIER_REUSE_CHOICES.map((item) => (
+          <label key={item.id} className="block border border-[#101A15]/10 px-3 py-2 text-[12px]">
+            <input type="radio" className="mr-2" checked={draft.reusePolicy === item.id} onChange={() => onPatch({ reusePolicy: item.id as EvidenceReusePolicy })} />
+            {item.label}
+            <span className="mt-1 block text-[#101A15]/55">
+              {item.id === "REUSE_WITHIN_REQUESTING_ORGANISATION"
+                ? `SOURCE may reuse this evidence for compatible requests from ${props.requesterName ?? "this organisation"} without asking again.`
+                : item.help}
+            </span>
+          </label>
+        ))}
+      </fieldset>
+      {props.openQuestions.length > 1 ? (
+        <fieldset className="space-y-1">
+          <legend className="text-[12px]">This evidence also supports (explicit choice)</legend>
+          {props.openQuestions
+            .filter((item) => item.id !== props.currentId)
+            .map((item) => (
+              <label key={item.id} className="block text-[12px]">
+                <input
+                  type="checkbox"
+                  className="mr-2"
+                  checked={draft.supportIds.includes(item.id)}
+                  onChange={(event) =>
+                    onPatch({
+                      supportIds: event.target.checked
+                        ? [...draft.supportIds, item.id]
+                        : draft.supportIds.filter((id) => id !== item.id),
+                    })
+                  }
+                />
+                {item.propertyLabel} · {item.subjectLabel}
+              </label>
+            ))}
+        </fieldset>
+      ) : null}
+    </div>
+  );
+}
+
+function UpstreamFields(props: {
+  draft: ReturnType<typeof draftForCase>;
+  suggested?: { name: string; email: string };
+  suggestedOrg?: string;
+  onPatch: (patch: Partial<ReturnType<typeof draftForCase>>) => void;
+}) {
+  const { draft, onPatch } = props;
+  return (
+    <div className="mt-6 space-y-3">
+      <p className="text-[13px] text-[#101A15]/70">
+        SOURCE will send a scoped request only if a contact email is provided. Organisation name alone is not enough.
+      </p>
+      <label className="block text-[12px]">
+        Supplier organisation
+        <input className="mt-1 w-full border border-[#101A15]/15 px-3 py-2 text-[13px]" value={draft.upstreamName} onChange={(e) => onPatch({ upstreamName: e.target.value })} />
+      </label>
+      <label className="block text-[12px]">
+        Contact email
+        <input className="mt-1 w-full border border-[#101A15]/15 px-3 py-2 text-[13px]" type="email" value={draft.upstreamEmail} onChange={(e) => onPatch({ upstreamEmail: e.target.value })} />
+      </label>
+      <label className="block text-[12px]">
+        Contact name (optional)
+        <input className="mt-1 w-full border border-[#101A15]/15 px-3 py-2 text-[13px]" value={draft.upstreamContactName} onChange={(e) => onPatch({ upstreamContactName: e.target.value })} />
+      </label>
+      {props.suggested ? (
+        <p className="text-[12px] text-[#101A15]/70">
+          SOURCE already has {props.suggested.email}
+          {props.suggestedOrg ? ` for ${props.suggestedOrg}` : ""}. Confirm this contact before SOURCE queues a request.
+          <button type="button" className="ml-2 text-[#0B6E50]" onClick={() => onPatch({ upstreamEmail: props.suggested!.email, upstreamContactName: props.suggested!.name })}>
+            Use this contact
+          </button>
+        </p>
+      ) : null}
+      {!draft.upstreamEmail.trim() && draft.upstreamName.trim() ? (
+        <p className="text-[12px] text-[#B26B2C]">Contact details required — request not sent.</p>
+      ) : null}
+      <select className="w-full border border-[#101A15]/15 px-3 py-2 text-[13px]" value={draft.upstreamMode} onChange={(e) => onPatch({ upstreamMode: e.target.value as UpstreamContactMode })}>
+        <option value="confidential">Keep my supplier identity protected</option>
+        <option value="on_behalf">Contact them on behalf of my customer</option>
+        <option value="without_customer">Contact them without naming the customer</option>
+      </select>
+    </div>
+  );
+}
+
+function ColleagueFields(props: {
+  draft: ReturnType<typeof draftForCase>;
+  ownContacts?: { name: string; email: string }[];
+  wrongPerson: boolean;
+  onPatch: (patch: Partial<ReturnType<typeof draftForCase>>) => void;
+}) {
+  const { draft, onPatch } = props;
+  return (
+    <div className="mt-6 space-y-3">
+      <p className="text-[13px] text-[#101A15]/70">
+        SOURCE will send this person a scoped request for this requirement only. This does not mark the requirement ready.
+      </p>
+      <label className="block text-[12px]">
+        Work email
+        <input className="mt-1 w-full border border-[#101A15]/15 px-3 py-2 text-[13px]" type="email" required value={draft.colleagueEmail} onChange={(e) => onPatch({ colleagueEmail: e.target.value })} />
+      </label>
+      <label className="block text-[12px]">
+        Name (optional)
+        <input className="mt-1 w-full border border-[#101A15]/15 px-3 py-2 text-[13px]" value={draft.colleagueName} onChange={(e) => onPatch({ colleagueName: e.target.value })} />
+      </label>
+      {props.ownContacts?.[0] ? (
+        <p className="text-[12px] text-[#101A15]/70">
+          SOURCE already has {props.ownContacts[0].email}. Confirm before dispatch.
+          <button type="button" className="ml-2 text-[#0B6E50]" onClick={() => onPatch({ colleagueEmail: props.ownContacts![0].email, colleagueName: props.ownContacts![0].name })}>
+            Use this contact
+          </button>
+        </p>
       ) : null}
     </div>
   );
@@ -744,10 +890,7 @@ function ReuseConsentCard(props: {
       </p>
       <p className="mt-3 text-[13px] text-[#101A15]/75">
         SOURCE believes this evidence may also support{" "}
-        {(row.proposedProducts && row.proposedProducts.length > 0
-          ? row.proposedProducts
-          : [row.proposedUse]
-        )
+        {(row.proposedProducts && row.proposedProducts.length > 0 ? row.proposedProducts : [row.proposedUse])
           .filter(Boolean)
           .join(", ") || "this request"}
         .
