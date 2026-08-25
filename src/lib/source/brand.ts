@@ -26,20 +26,24 @@ export const SOURCE_FORBIDDEN_WORDS = [
   "enige bron van waarheid",
   "the only source of truth",
   "AI regelt automatisch",
+  "audit-ready",
+  "audit ready",
+  "automatically requested",
+  "trusted product claims infrastructure",
 ];
 
 export const SOURCE_USPS = [
-  "Connect existing ERP, PIM, PLM or CSV — SOURCE finds the gaps.",
-  "Identity resolution before evidence: precision before automation.",
-  "Suppliers answer once and decide how claims may be reused.",
-  "Every claim carries provenance, permission and a verification level — never 'true'.",
+  "Lightweight in your stack: SOURCE does not replace ERP, PIM, PLM or DPP platforms.",
+  "Finds evidence gaps, retrieves existing evidence, and prepares targeted supplier requests.",
+  "READY only when identity, value, evidence, scope, validity, permission and conflict gates pass.",
+  "Decline, uncertainty, delegation, silence and unresolved outcomes are recorded — not hidden.",
 ];
 
 export const SOURCE_TONE =
   "Precies, bescheiden, infrastructureel. Schrijf als een auditor die je aardig vindt: exact, kort, nooit meer belovend dan het bewijs draagt. Toon status, niet waarheid. Noem het getal. Actieve stem. Ontbrekend bewijs is zichtbaar. Engelse producttermen (claim, evidence, reuse, provenance) blijven Engels.";
 
 export const SOURCE_MISSION =
-  "SOURCE is Digital Product Passport readiness software for European manufacturers, importers and private-label brands. It connects an existing product catalogue, resolves product and supplier identity, shows what evidence exists and what is missing, and helps collect that evidence from suppliers.";
+  "SOURCE is a product evidence resolution layer for European manufacturers. It finds evidence gaps, retrieves existing evidence, and prepares targeted supplier requests without replacing ERP, PIM, PLM or DPP platforms.";
 
 export const SOURCE_VISUAL_STYLE = {
   logoPosition: "top-left" as const,
@@ -56,7 +60,8 @@ export const SOURCE_VISUAL_STYLE = {
 export const PUBLIC_NAV = [
   { href: "/product", label: "Product" },
   { href: "/how-it-works", label: "How it works" },
-  { href: "/digital-product-passport", label: "Digital Product Passport" },
+  { href: "/manufacturers", label: "Manufacturers" },
+  { href: "/dpp-readiness", label: "DPP readiness" },
   { href: "/pricing", label: "Pricing" },
 ] as const;
 

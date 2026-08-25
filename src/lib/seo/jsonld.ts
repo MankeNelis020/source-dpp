@@ -43,12 +43,12 @@ export function softwareNode(): JsonLd {
     operatingSystem: "Web",
     description: SOURCE_DEFINITION,
     featureList: [
-      "Catalogue connection",
-      "Identity resolution",
       "Evidence gap detection",
-      "Supplier collection",
+      "Retrieval of existing evidence",
+      "Scoped supplier requests",
+      "Readiness gates",
       "Permissioned reuse",
-      "Auditable evidence ledger",
+      "Unresolved outcome recording",
     ],
     publisher: { "@id": `${SITE_URL}/#organization` },
   };

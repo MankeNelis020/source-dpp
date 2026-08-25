@@ -1,5 +1,68 @@
 import { SourceLabel } from "./ui";
 
+export function PageHero({
+  kicker,
+  title,
+  lead,
+  children,
+}: {
+  kicker: string;
+  title: string;
+  lead?: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <header className="border-b border-ink/8">
+      <div className="mx-auto max-w-6xl px-6 py-16 md:py-24">
+        <SourceLabel>{kicker}</SourceLabel>
+        <h1 className="mt-4 max-w-2xl font-[family-name:var(--font-space)] text-[38px] font-medium leading-[1.08] tracking-[-0.02em] sm:text-5xl md:text-[3.35rem]">
+          {title}
+        </h1>
+        {lead ? (
+          <p className="mt-4 max-w-xl text-[14.5px] leading-relaxed text-ink/70">{lead}</p>
+        ) : null}
+        {children ? <div className="mt-8">{children}</div> : null}
+      </div>
+    </header>
+  );
+}
+
+export function Section({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={className}>
+      <div className="mx-auto max-w-6xl px-6 py-16 md:py-20">{children}</div>
+    </section>
+  );
+}
+
+export function SectionHeader({
+  kicker,
+  title,
+  lead,
+}: {
+  kicker: string;
+  title: string;
+  lead?: string;
+}) {
+  return (
+    <header>
+      <SourceLabel>{kicker}</SourceLabel>
+      <h2 className="mt-3 max-w-2xl font-[family-name:var(--font-space)] text-[28px] font-medium tracking-[-0.02em] md:text-[33px]">
+        {title}
+      </h2>
+      {lead ? (
+        <p className="mt-4 max-w-2xl text-[14.5px] leading-relaxed text-ink/70">{lead}</p>
+      ) : null}
+    </header>
+  );
+}
+
 export function AnswerBlock({
   question,
   answer,

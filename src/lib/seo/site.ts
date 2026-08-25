@@ -14,17 +14,17 @@ export const SOFTWARE_ID = `${SITE_URL}/#software`;
 
 /** One-sentence definition. Reuse in metadata, schema, about, llms.txt. */
 export const SOURCE_DEFINITION =
-  "SOURCE is Digital Product Passport readiness software for European manufacturers, importers and private-label brands. It connects an existing product catalogue, resolves product and supplier identity, shows what evidence exists and what is missing, and helps collect that evidence from suppliers.";
+  "SOURCE is a product evidence resolution layer for European manufacturers. It finds evidence gaps, retrieves existing evidence, and prepares targeted supplier requests without replacing ERP, PIM, PLM or DPP platforms.";
 
-export const SOURCE_CATEGORY = "DPP readiness software";
+export const SOURCE_CATEGORY = "Product evidence management";
 
 export const SOURCE_APPLICATION_CATEGORY = "BusinessApplication";
 
 export const SOURCE_OFFERS =
-  "Catalogue connection, identity resolution, evidence gap detection, supplier collection, permissioned reuse, and an auditable evidence ledger. A Digital Product Passport is an output of that process, not the starting point.";
+  "Evidence-gap detection, retrieval of existing evidence, scoped supplier requests, readiness gates (identity, value, evidence, scope, validity, permission, conflict), and provenance with unresolved outcomes. SOURCE prepares evidence before Digital Product Passport publication. It does not publish passports, create data carriers, or replace ERP, PIM, PLM or DPP platforms.";
 
 export const SOURCE_DOES_NOT =
-  "SOURCE does not currently determine legal DPP applicability per SKU, generate a published passport or QR code, or provide legal advice.";
+  "SOURCE does not replace ERP, PIM, PLM or DPP platforms; does not publish Digital Product Passports or create data carriers; does not determine definitive legal scope for every SKU; does not independently certify evidence; and does not guarantee supplier response or compliance.";
 
 export const SOURCE_GEO = "European Union";
 

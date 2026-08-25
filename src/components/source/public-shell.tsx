@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { PUBLIC_NAV } from "@/lib/source/brand";
+import { PRIMARY_CTA } from "@/lib/source/copy";
 import { SourceWordmark } from "./wordmark";
 import { SourceButton, SourceLabel } from "./ui";
 import { PublicMobileNav } from "./public-mobile-nav";
@@ -27,7 +28,7 @@ export function PublicShell({ children }: { children: React.ReactNode }) {
             <Link href="/login" className="text-[13px] text-ink/65 hover:text-ink">
               Sign in
             </Link>
-            <SourceButton href="/signup">Check my catalogue</SourceButton>
+            <SourceButton href={PRIMARY_CTA.href}>{PRIMARY_CTA.label}</SourceButton>
           </div>
           <PublicMobileNav />
         </div>
@@ -38,36 +39,37 @@ export function PublicShell({ children }: { children: React.ReactNode }) {
           <div>
             <SourceWordmark size="sm" />
             <p className="mt-4 max-w-xs text-[13px] leading-relaxed text-ink/55">
-              Digital Product Passport readiness software. Amsterdam.
+              Product evidence resolution for European manufacturers. Amsterdam. SOURCE prepares
+              evidence before DPP publication; it does not publish passports or create data carriers.
             </p>
           </div>
           <FooterCol label="Product">
             <FooterLink href="/product">Product</FooterLink>
             <FooterLink href="/how-it-works">How it works</FooterLink>
+            <FooterLink href="/manufacturers">Manufacturers</FooterLink>
+            <FooterLink href="/suppliers">Suppliers</FooterLink>
             <FooterLink href="/pricing">Pricing</FooterLink>
-            <FooterLink href="/methodology">Methodology</FooterLink>
             <FooterLink href="/developers">Developers</FooterLink>
           </FooterCol>
-          <FooterCol label="Digital Product Passport">
-            <FooterLink href="/digital-product-passport">DPP hub</FooterLink>
-            <FooterLink href="/digital-product-passport/what-is-a-dpp">What is a DPP?</FooterLink>
-            <FooterLink href="/digital-product-passport/espr">ESPR</FooterLink>
-            <FooterLink href="/digital-product-passport/who-is-responsible">
-              Who is responsible
-            </FooterLink>
-            <FooterLink href="/digital-product-passport/dpp-readiness">DPP readiness</FooterLink>
+          <FooterCol label="Evidence and DPP">
+            <FooterLink href="/dpp-readiness">DPP readiness</FooterLink>
+            <FooterLink href="/digital-product-passport">DPP knowledge hub</FooterLink>
+            <FooterLink href="/methodology">Methodology</FooterLink>
+            <FooterLink href="/resources">Resources</FooterLink>
             <FooterLink href="/resources/glossary">Glossary</FooterLink>
+            <FooterLink href="/faq">FAQ</FooterLink>
           </FooterCol>
           <FooterCol label="Company">
             <FooterLink href="/about">About</FooterLink>
             <FooterLink href="/authors/source-research">SOURCE Research</FooterLink>
-            <FooterLink href="/suppliers">For suppliers</FooterLink>
             <FooterLink href="/login">Sign in</FooterLink>
+            <FooterLink href={PRIMARY_CTA.href}>{PRIMARY_CTA.label}</FooterLink>
           </FooterCol>
         </div>
         <div className="mx-auto max-w-6xl px-6 pb-12">
           <p className="font-[family-name:var(--font-plex)] text-[10px] uppercase tracking-[0.14em] text-ink/40">
-            We never say a claim is true. We show you how it&apos;s known. Not legal advice.
+            We never say a claim is true. We show you how it&apos;s known. Not legal advice. SOURCE
+            does not replace ERP, PIM, PLM, or DPP platforms.
           </p>
         </div>
       </footer>

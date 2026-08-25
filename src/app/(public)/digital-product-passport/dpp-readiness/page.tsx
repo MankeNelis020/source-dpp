@@ -77,7 +77,7 @@ export default function ReadinessPage() {
           If you manage hundreds or thousands of SKUs, start by connecting the catalogue you already
           have.{" "}
           <Link href="/signup" className="underline-offset-4 hover:underline">
-            Check my catalogue
+            Request an evidence assessment
           </Link>{" "}
           leads into SOURCE. The demo at /app is sample data and is not indexed.
         </FactBlock>

@@ -32,12 +32,12 @@ export function HeroGraph() {
           <div className="pl-6">
             <Mono>67% recycled</Mono>
             <EvidenceLine className="w-24" />
-            <StatusPill tone="signal">Evidence verified</StatusPill>
+            <StatusPill tone="signal">READY</StatusPill>
           </div>
         </Node>
         <Node show={!!visible.textile} label="Textile">
           <div className="pl-6 text-ink/55">
-            Missing origin
+            UNRESOLVED · missing origin
             <EvidenceLine missing className="w-16" />
           </div>
         </Node>

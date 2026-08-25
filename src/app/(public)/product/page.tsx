@@ -1,78 +1,129 @@
 import type { Metadata } from "next";
-import { EvidenceLine, SourceButton, SourceLabel } from "@/components/source/ui";
+import { SourceLinkButton } from "@/components/source/ui";
+import { PageHero, Section, SectionHeader } from "@/components/source/knowledge";
+import { SourceJsonLd } from "@/components/source/source-json-ld";
+import { PRIMARY_CTA, READINESS_GATES } from "@/lib/source/copy";
 import { pageMetadata } from "@/lib/seo/metadata";
 
 export const metadata: Metadata = pageMetadata("/product");
 
 export default function ProductPage() {
   return (
-    <div className="mx-auto max-w-6xl px-6 py-16 md:py-24">
-      <SourceLabel>Product</SourceLabel>
-      <h1 className="mt-4 max-w-2xl font-[family-name:var(--font-space)] text-[40px] font-medium leading-[1.08] tracking-[-0.02em] md:text-[48px]">
-        One workflow. Not a feature list.
-      </h1>
-      <p className="mt-4 max-w-xl text-[14.5px] leading-relaxed text-ink/70">
-        A manufacturer should not feel they are building a supply-chain database. They should feel:
-        I connect my existing administration. SOURCE tells me what we know, what is missing, and who
-        to ask.
-      </p>
+    <>
+      <SourceJsonLd path="/product" />
+      <article>
+        <PageHero
+          kicker="Product"
+          title="Seven gates between a stored value and a READY record."
+          lead="SOURCE does not treat a number, a PDF, or a supplier logo as proof. Identity, evidence, scope, validity, permission, and conflicts are reviewed separately. Unresolved outcomes stay unresolved."
+        >
+          <SourceLinkButton href={PRIMARY_CTA.href}>{PRIMARY_CTA.label}</SourceLinkButton>
+        </PageHero>
 
-      <div className="mt-16 grid gap-6 md:grid-cols-3">
-        <FlowCol title="Your systems" items={["SAP", "PIM", "PLM", "CSV"]} />
-        <FlowCol
-          title="SOURCE"
-          accent
-          items={["Identity", "Claims", "Evidence", "Permissions"]}
-        />
-        <FlowCol title="Your outputs" items={["ERP", "DPP", "Compliance", "Procurement", "API"]} />
-      </div>
+        <Section>
+          <SectionHeader
+            kicker="Readiness gates"
+            title="READY only when every applicable gate passes."
+            lead="Gates can be not applicable for a given claim. They are never silently skipped when they apply. SOURCE records the outcome; it does not independently certify evidence."
+          />
+          <ol className="mt-10 space-y-4">
+            {READINESS_GATES.map((gate, i) => (
+              <li
+                key={gate.title}
+                className="grid gap-2 border border-ink/8 bg-card p-5 md:grid-cols-[4.5rem_1fr]"
+              >
+                <p className="font-[family-name:var(--font-plex)] text-[11px] font-medium uppercase tracking-[0.14em] text-ink/55">
+                  Gate {i + 1}
+                </p>
+                <div>
+                  <h3 className="font-[family-name:var(--font-space)] text-base tracking-[-0.02em] text-ink">
+                    {gate.title}
+                  </h3>
+                  <p className="mt-1 text-[13px] leading-relaxed text-ink/70">{gate.body}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </Section>
 
-      <div className="mt-20 grid gap-8 md:grid-cols-2">
-        <Module title="Catalogue Sync" body="Connect ERP, PIM, PLM or upload CSV/XLSX. Imports run asynchronously; SOURCE never asks the browser to process 80,000 products." />
-        <Module title="Identity Resolution" body="Normalize names and identifiers, score candidates, auto-match at high confidence, send the rest to human review. Precision before recall." />
-        <Module title="Supplier Collection" body="Gaps are grouped per supplier and product family. SOURCE requests 24 actions, not 143 emails." />
-        <Module title="Evidence Ledger" body="Original documents are immutable. SHA-256, issuer, validity, linked claims, extraction runs and audit history." />
-        <Module title="Permissioned Reuse" body="A claim is reusable only when identity, evidence, audience, purpose and consent all pass. Reuse is never implicit." />
-        <Module title="Exports & API" body="Open formats. Versioned API. A customer can leave SOURCE with products, actors, claims, evidence metadata, permissions and audit history." />
-      </div>
+        <Section className="bg-paper">
+          <SectionHeader
+            kicker="Architecture"
+            title="Input, resolution, output — without becoming the catalogue."
+            lead="SOURCE consumes product identity and claim values from existing systems, resolves evidence against those claims, and returns readiness plus unresolved reasons. Master data stays where it already lives."
+          />
+          <div className="mt-10 grid gap-px overflow-hidden border border-ink/8 bg-ink/8 md:grid-cols-3">
+            {[
+              {
+                title: "Input",
+                body: "Product identities, claim values, and existing files imported from ERP, PIM, PLM, or spreadsheets. SOURCE does not become another master-data system.",
+              },
+              {
+                title: "Resolution",
+                body: "Gap identification, reuse when identity, scope, validity, and permission allow, and prepared requests to a responsible supplier or internal owner. Uncertain identities remain visible.",
+              },
+              {
+                title: "Output",
+                body: "READY or UNRESOLVED records with reasons, plus export of the evidence trail for review in downstream systems. SOURCE does not publish passports from this output.",
+              },
+            ].map((col) => (
+              <div key={col.title} className="bg-card p-6">
+                <h3 className="font-[family-name:var(--font-space)] text-base tracking-[-0.02em] text-ink">
+                  {col.title}
+                </h3>
+                <p className="mt-2 text-[13px] leading-relaxed text-ink/70">{col.body}</p>
+              </div>
+            ))}
+          </div>
+        </Section>
 
-      <div className="mt-16">
-        <SourceButton href="/signup">Connect your supply chain</SourceButton>
-      </div>
-    </div>
-  );
-}
-
-function FlowCol({
-  title,
-  items,
-  accent,
-}: {
-  title: string;
-  items: string[];
-  accent?: boolean;
-}) {
-  return (
-    <div className="border border-ink/8 bg-card p-6">
-      <SourceLabel>{title}</SourceLabel>
-      {accent ? <EvidenceLine className="mt-2" /> : null}
-      <ul className="mt-4 space-y-2 font-[family-name:var(--font-plex)] text-[13px]">
-        {items.map((item) => (
-          <li key={item}>{item}</li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function Module({ title, body }: { title: string; body: string }) {
-  return (
-    <article>
-      <EvidenceLine />
-      <h2 className="mt-4 font-[family-name:var(--font-space)] text-[20px] tracking-[-0.02em]">
-        {title}
-      </h2>
-      <p className="mt-2 text-[13px] leading-relaxed text-ink/70">{body}</p>
-    </article>
+        <Section>
+          <SectionHeader
+            kicker="Distinctions"
+            title="Values, evidence, permission, and unresolved outcomes are different objects."
+            lead="A recycled-content percentage is a value. A mill certificate is evidence. A recorded licence to reuse that certificate is permission. A declined supplier request is an unresolved outcome — not missing data to be filled in by assumption."
+          />
+          <div className="mt-8 overflow-x-auto border border-ink/8">
+            <table className="w-full min-w-[36rem] text-left text-[13px]">
+              <thead className="bg-card font-[family-name:var(--font-plex)] text-[11px] uppercase tracking-[0.12em] text-ink/55">
+                <tr>
+                  <th className="px-4 py-3 font-medium">Object</th>
+                  <th className="px-4 py-3 font-medium">What it is</th>
+                  <th className="px-4 py-3 font-medium">What it is not</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink/8 text-ink">
+                <tr>
+                  <td className="px-4 py-3 font-medium">Value</td>
+                  <td className="px-4 py-3 text-ink/70">A claim figure stored on the product record.</td>
+                  <td className="px-4 py-3 text-ink/70">Proof that the figure is evidenced.</td>
+                </tr>
+                <tr>
+                  <td className="px-4 py-3 font-medium">Evidence</td>
+                  <td className="px-4 py-3 text-ink/70">
+                    A file, statement, or reference attached to that value.
+                  </td>
+                  <td className="px-4 py-3 text-ink/70">Permission to reuse it on another SKU or channel.</td>
+                </tr>
+                <tr>
+                  <td className="px-4 py-3 font-medium">Permission</td>
+                  <td className="px-4 py-3 text-ink/70">
+                    Recorded reuse rights for a named identity and scope.
+                  </td>
+                  <td className="px-4 py-3 text-ink/70">Implied by possession of the file.</td>
+                </tr>
+                <tr>
+                  <td className="px-4 py-3 font-medium">Unresolved</td>
+                  <td className="px-4 py-3 text-ink/70">
+                    Decline, uncertainty, denial, conflict, or no response.
+                  </td>
+                  <td className="px-4 py-3 text-ink/70">A temporary empty field waiting to be guessed.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </Section>
+      </article>
+    </>
   );
 }

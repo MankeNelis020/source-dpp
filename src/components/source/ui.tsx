@@ -183,7 +183,7 @@ export function ClaimCard({
           <EvidenceLine missing={!verified} className="w-16" />
         </div>
         <StatusPill tone={verified ? "signal" : "muted"}>
-          {verified ? `Verified · id ${identity}` : "Declared"}
+          {verified ? `READY · id ${identity}` : "UNRESOLVED"}
         </StatusPill>
       </div>
       <dl className="mt-6 space-y-1.5 font-[family-name:var(--font-plex)] text-[11px] leading-relaxed text-ink/80">
@@ -261,7 +261,7 @@ export function SourceButton({
     signal: "bg-signal text-card hover:bg-signal/90",
   };
   const cls = cn(
-    "inline-flex items-center justify-center gap-2 px-4 py-2.5 text-[13px] font-medium transition-colors",
+    "inline-flex min-h-[44px] items-center justify-center gap-2 px-4 py-2.5 text-[13px] font-medium transition-colors",
     styles[variant],
     className
   );
@@ -277,6 +277,16 @@ export function SourceButton({
       {children}
     </button>
   );
+}
+
+export function SourceLinkButton(props: {
+  href: string;
+  children: React.ReactNode;
+  variant?: "primary" | "ghost" | "signal";
+  className?: string;
+  onClick?: () => void;
+}) {
+  return <SourceButton {...props} />;
 }
 
 export function SourceTable({

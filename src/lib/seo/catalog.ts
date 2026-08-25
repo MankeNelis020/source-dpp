@@ -21,73 +21,113 @@ export interface CatalogPage {
 export const CATALOG: CatalogPage[] = [
   {
     path: "/",
-    title: "Digital Product Passport readiness software",
+    title: "Lightweight in your stack. Heavyweight on evidence.",
     description:
-      "SOURCE connects your product catalogue, shows what evidence exists and what is missing, and helps you collect it from suppliers — so Digital Product Passports can follow from a complete record, not a blank form.",
-    lastModified: "2026-08-18",
+      "SOURCE is a product evidence resolution layer for European manufacturers. It finds evidence gaps, retrieves existing evidence, and prepares targeted supplier requests without replacing ERP, PIM, PLM or DPP platforms.",
+    lastModified: "2026-08-25",
     robots: "index",
     sitemap: true,
     changeFrequency: "monthly",
   },
   {
     path: "/product",
-    title: "How SOURCE works on a product catalogue",
+    title: "Seven readiness gates for product evidence",
     description:
-      "Connect ERP, PIM or CSV. SOURCE resolves identities, shows coverage and missing claims, groups supplier requests, and keeps an evidence ledger with permissions.",
-    lastModified: "2026-08-18",
+      "SOURCE separates identity, value, evidence, scope, validity, permission and conflict. A record is READY only when every applicable gate passes. Unresolved outcomes stay visible.",
+    lastModified: "2026-08-25",
     robots: "index",
     sitemap: true,
     changeFrequency: "monthly",
   },
   {
     path: "/how-it-works",
-    title: "From catalogue to evidence-ready records",
+    title: "Product evidence lifecycle, including unsuccessful outcomes",
     description:
-      "Manufacturers connect existing administration. SOURCE resolves identities, shows gaps, collects missing evidence from suppliers, and records provenance. Humans review; the model never sets verified.",
-    lastModified: "2026-08-18",
+      "From import through identity reconciliation, gap identification, focused requests, unsuccessful supplier outcomes, readiness gates, and downstream availability. SOURCE does not publish passports.",
+    lastModified: "2026-08-25",
+    robots: "index",
+    sitemap: true,
+    changeFrequency: "monthly",
+  },
+  {
+    path: "/manufacturers",
+    title: "SOURCE for manufacturer and importer teams",
+    description:
+      "Sit SOURCE beside ERP, PIM and PLM. Operations, quality, procurement and DPP programme teams share one evidence layer without creating another master-data system.",
+    lastModified: "2026-08-25",
     robots: "index",
     sitemap: true,
     changeFrequency: "monthly",
   },
   {
     path: "/suppliers",
-    title: "SOURCE for suppliers",
+    title: "Scoped supplier disclosure in SOURCE",
     description:
-      "Answer a customer request once, attach evidence, and decide who may reuse it. Magic link, no account wall before you respond.",
-    lastModified: "2026-08-18",
+      "Answer, decline, delegate, mark uncertainty, or refuse reuse permission on a scoped request. Non-success outcomes are recorded. Nordform Metals is fictional example data.",
+    lastModified: "2026-08-25",
+    robots: "index",
+    sitemap: true,
+    changeFrequency: "monthly",
+  },
+  {
+    path: "/dpp-readiness",
+    title: "DPP evidence preparation, not passport publication",
+    description:
+      "SOURCE prepares evidence before Digital Product Passport publication. It does not publish passports, create data carriers, or determine definitive legal scope for every SKU.",
+    lastModified: "2026-08-25",
     robots: "index",
     sitemap: true,
     changeFrequency: "monthly",
   },
   {
     path: "/pricing",
-    title: "Pricing",
+    title: "Controlled evidence assessment, not a public rate card",
     description:
-      "SOURCE is priced on active supplier relationships, not SKUs. Pilot, Core, Scale and Enterprise. Suppliers use SOURCE free.",
-    lastModified: "2026-08-18",
+      "SOURCE does not publish fixed prices, implementation timelines or go-live promises. Scope, connectors and commercial terms are confirmed in a controlled assessment.",
+    lastModified: "2026-08-25",
     robots: "index",
     sitemap: true,
     changeFrequency: "yearly",
   },
   {
     path: "/developers",
-    title: "Developers and open integration",
+    title: "File interchange now, APIs confirmed per assessment",
     description:
-      "Planned versioned API for actors, products, claims, evidence, permissions and requests. Connectors deliver source records; identity and permissions stay above that.",
-    lastModified: "2026-08-18",
+      "Current capabilities are file import and export. APIs, webhooks and named connectors are integration targets whose availability must be confirmed during assessment.",
+    lastModified: "2026-08-25",
     robots: "index",
     sitemap: true,
     changeFrequency: "monthly",
   },
   {
     path: "/about",
-    title: "About SOURCE",
+    title: "A value alone is not evidence",
     description:
-      "SOURCE is a product-data evidence company in Amsterdam. We build DPP readiness software: identity, gaps, supplier collection and an auditable ledger — not a QR-code generator.",
-    lastModified: "2026-08-18",
+      "SOURCE’s thesis: a stored number is insufficient without identity, evidence, scope, validity, permission and conflict review. Amsterdam. Not legal advice.",
+    lastModified: "2026-08-25",
     robots: "index",
     sitemap: true,
     changeFrequency: "yearly",
+  },
+  {
+    path: "/faq",
+    title: "SOURCE FAQ: boundaries, readiness and pricing",
+    description:
+      "Does SOURCE replace ERP or publish DPPs? When is a record READY? What if a supplier declines? SOURCE does not guarantee compliance. Pricing is assessment-based.",
+    lastModified: "2026-08-25",
+    robots: "index",
+    sitemap: true,
+    changeFrequency: "monthly",
+  },
+  {
+    path: "/resources",
+    title: "SOURCE resources and forthcoming briefs",
+    description:
+      "Published DPP knowledge and methodology, plus labelled forthcoming directions. SOURCE does not occupy URLs with empty or falsely completed articles.",
+    lastModified: "2026-08-25",
+    robots: "index",
+    sitemap: true,
+    changeFrequency: "monthly",
   },
   {
     path: "/methodology",
@@ -151,7 +191,7 @@ export const CATALOG: CatalogPage[] = [
   },
   {
     path: "/digital-product-passport/dpp-readiness",
-    title: "Digital Product Passport readiness",
+    title: "What DPP readiness means in operations",
     description:
       "DPP readiness is whether an organisation can identify products, attach reliable evidence, see what is missing, and collect it from suppliers. Publication is not the first problem.",
     lastModified: "2026-08-18",

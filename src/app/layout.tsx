@@ -24,7 +24,7 @@ const plex = IBM_Plex_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: `Digital Product Passport readiness software | ${SITE_NAME}`,
+    default: `Product evidence resolution | ${SITE_NAME}`,
     template: `%s | ${SITE_NAME}`,
   },
   description: SOURCE_DEFINITION,

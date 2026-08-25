@@ -30,7 +30,7 @@ export default function OpenGraphImage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div style={{ width: 120, height: 6, background: "#0B6E50" }} />
           <div style={{ fontSize: 28, color: "#101A15", opacity: 0.7 }}>
-            Catalogue → evidence gaps → suppliers → DPP-ready record
+            Product evidence resolution for European manufacturers
           </div>
         </div>
       </div>

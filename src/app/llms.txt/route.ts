@@ -17,8 +17,13 @@ Knowledge pages cite EUR-Lex (Regulation (EU) 2024/1781 and related instruments)
 - ${SITE_URL}/
 - ${SITE_URL}/product
 - ${SITE_URL}/how-it-works
+- ${SITE_URL}/manufacturers
+- ${SITE_URL}/suppliers
+- ${SITE_URL}/dpp-readiness
 - ${SITE_URL}/methodology
 - ${SITE_URL}/pricing
+- ${SITE_URL}/developers
+- ${SITE_URL}/faq
 
 ## Digital Product Passport
 - ${SITE_URL}/digital-product-passport
@@ -26,6 +31,7 @@ Knowledge pages cite EUR-Lex (Regulation (EU) 2024/1781 and related instruments)
 - ${SITE_URL}/digital-product-passport/espr
 - ${SITE_URL}/digital-product-passport/who-is-responsible
 - ${SITE_URL}/digital-product-passport/dpp-readiness
+- ${SITE_URL}/resources
 - ${SITE_URL}/resources/glossary
 
 ## Company

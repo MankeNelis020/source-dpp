@@ -1,63 +1,68 @@
 import type { Metadata } from "next";
-import { ClaimCard, EvidenceLine, SourceButton, SourceLabel, StatusPill } from "@/components/source/ui";
+import { ClaimCard, SourceLinkButton, StatusPill } from "@/components/source/ui";
+import { PageHero, Section, SectionHeader } from "@/components/source/knowledge";
+import { SourceJsonLd } from "@/components/source/source-json-ld";
+import { SUPPLIER_CTA } from "@/lib/source/copy";
 import { pageMetadata } from "@/lib/seo/metadata";
 
 export const metadata: Metadata = pageMetadata("/suppliers");
 
 export default function SuppliersPage() {
   return (
-    <div className="mx-auto max-w-6xl px-6 py-16 md:py-24">
-      <div className="grid gap-12 md:grid-cols-2 md:items-center">
-        <div>
-          <SourceLabel>For suppliers</SourceLabel>
-          <h1 className="mt-4 font-[family-name:var(--font-space)] text-[40px] font-medium leading-[1.08] tracking-[-0.02em] md:text-[48px]">
-            Answer once.
-            <br />
-            Stay in control.
-          </h1>
-          <p className="mt-4 text-[14.5px] leading-relaxed text-ink/70">
-            When customers request product information through SOURCE, you decide what you provide
-            and how it may be reused. This is not a sales site. It should feel like it saves you work.
-          </p>
-        </div>
-        <ClaimCard
-          value="67%"
-          reuse="verified customers"
-          verified
-        />
-      </div>
+    <>
+      <SourceJsonLd path="/suppliers" />
+      <article>
+        <PageHero
+          kicker="For suppliers"
+          title="Scoped disclosure. You decide what leaves the request."
+          lead="A SOURCE request names the product identity, the claim, and the evidence sought. You can answer, decline, delegate, mark uncertainty, or refuse reuse permission. None of those outcomes is hidden from the manufacturer."
+        >
+          <SourceLinkButton href={SUPPLIER_CTA.href}>{SUPPLIER_CTA.label}</SourceLinkButton>
+        </PageHero>
 
-      <div className="mt-20 grid gap-8 md:grid-cols-5">
-        {["Open request.", "Provide information.", "Upload evidence.", "Choose permissions.", "Done."].map(
-          (item, i) => (
-            <div key={item}>
-              <SourceLabel>{String(i + 1).padStart(2, "0")}</SourceLabel>
-              <p className="mt-2 text-[13px] leading-relaxed">{item}</p>
+        <Section>
+          <div className="grid gap-10 lg:grid-cols-2 lg:items-start">
+            <div>
+              <SectionHeader
+                kicker="Illustration"
+                title="Fictional example data, not a live supplier."
+                lead="Nordform Metals GmbH is an invented counterpart used to show how a scoped request looks. It is not a customer, partner, or real legal entity."
+              />
+              <ul className="mt-8 space-y-3 text-[13px] leading-relaxed text-ink/80">
+                <li>Disclose only the files the request asks for.</li>
+                <li>Delegate to a mill or recycler; the chain stays visible.</li>
+                <li>Mark a value as uncertain instead of guessing.</li>
+                <li>Grant or refuse reuse permission for a named identity and purpose.</li>
+                <li>Decline the request with a reason. Decline is a recorded outcome.</li>
+              </ul>
             </div>
-          )
-        )}
-      </div>
+            <ClaimCard
+              issuer="Nordform Metals GmbH"
+              reuse="denied · this channel"
+              verified={false}
+            />
+          </div>
+        </Section>
 
-      <div className="mt-16 border border-ink/8 bg-card p-8">
-        <EvidenceLine />
-        <h2 className="mt-4 font-[family-name:var(--font-space)] text-[20px]">
-          No implementation required
-        </h2>
-        <p className="mt-2 max-w-xl text-[13px] leading-relaxed text-ink/70">
-          A scoped magic link is enough. You see only the requested claims, upload evidence, and
-          choose who may reuse it. Create a free account afterwards if you want to reuse evidence
-          next time — never before you have answered.
-        </p>
-        <div className="mt-6 flex flex-wrap gap-2">
-          <StatusPill tone="signal">Verified customers</StatusPill>
-          <StatusPill tone="teal">Request access</StatusPill>
-          <StatusPill tone="muted">Verification only</StatusPill>
-          <StatusPill tone="attention">Private</StatusPill>
-        </div>
-        <div className="mt-8">
-          <SourceButton href="/s/demo">View example request</SourceButton>
-        </div>
-      </div>
-    </div>
+        <Section className="bg-paper">
+          <SectionHeader
+            kicker="Non-success outcomes"
+            title="A request is not a promise that someone will answer."
+            lead="SOURCE does not claim supplier response rates. The demonstration request shows the interaction, not a performance guarantee."
+          />
+          <div className="mt-8 flex flex-wrap gap-2">
+            <StatusPill tone="signal">Answered with permission</StatusPill>
+            <StatusPill tone="teal">Delegated</StatusPill>
+            <StatusPill tone="attention">Declined</StatusPill>
+            <StatusPill tone="muted">Uncertain</StatusPill>
+            <StatusPill tone="muted">No response</StatusPill>
+            <StatusPill tone="attention">Permission denied</StatusPill>
+          </div>
+          <SourceLinkButton href={SUPPLIER_CTA.href} variant="ghost" className="mt-8">
+            Open the demonstration request
+          </SourceLinkButton>
+        </Section>
+      </article>
+    </>
   );
 }
