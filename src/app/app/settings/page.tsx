@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { PageHeader } from "@/components/source/page-header";
 import { SourceLabel } from "@/components/source/ui";
 import { useSourceQuery } from "@/client/source/api";
-import Link from "next/link";
+import { BillingSettingsPanel } from "./billing-panel";
 
 const TABS = [
   "Organisation",
@@ -77,9 +78,7 @@ export default function SettingsPage() {
         {tab === "Security" ? (
           <p>Supabase authenticates the human. SOURCE authorizes from organisation membership rows, not user_metadata.</p>
         ) : null}
-        {tab === "Billing" ? (
-          <p>Billing is not part of this workspace yet.</p>
-        ) : null}
+        {tab === "Billing" ? <BillingSettingsPanel /> : null}
         {tab === "Audit log" ? (
           <p className="text-[#101A15]/65">Tenant audit is available to owners, admins, and auditors from internal APIs.</p>
         ) : null}

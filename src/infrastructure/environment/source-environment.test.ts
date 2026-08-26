@@ -383,4 +383,39 @@ describe("SOURCE environment isolation", () => {
       /SOURCE_DEMO_AUTH is not allowed/
     );
   });
+
+  it("allows hosted environments to boot without Stripe, and requires a webhook secret when the secret key is set", () => {
+    const env = loadSourceEnvironment({
+      SOURCE_ENV: "production",
+      NEXT_PUBLIC_SUPABASE_URL: PRODUCTION_SUPABASE_URL,
+      SOURCE_APP_DATABASE_URL: PROD_APP_URL,
+      ...HOSTED,
+      ...PRODUCTION_EMAIL,
+    });
+    expect(env.stripeSecretKey).toBeUndefined();
+    expectConfigError(
+      () =>
+        loadSourceEnvironment({
+          SOURCE_ENV: "production",
+          NEXT_PUBLIC_SUPABASE_URL: PRODUCTION_SUPABASE_URL,
+          SOURCE_APP_DATABASE_URL: PROD_APP_URL,
+          STRIPE_SECRET_KEY: "sk_live_not_a_real_key",
+          ...HOSTED,
+          ...PRODUCTION_EMAIL,
+        }),
+      /STRIPE_WEBHOOK_SECRET is required/
+    );
+    const withStripe = loadSourceEnvironment({
+      SOURCE_ENV: "production",
+      NEXT_PUBLIC_SUPABASE_URL: PRODUCTION_SUPABASE_URL,
+      SOURCE_APP_DATABASE_URL: PROD_APP_URL,
+      STRIPE_SECRET_KEY: "sk_live_not_a_real_key",
+      STRIPE_WEBHOOK_SECRET: "whsec_test_not_a_real_secret",
+      SOURCE_STRIPE_PRICE_CORE: "price_test_core",
+      ...HOSTED,
+      ...PRODUCTION_EMAIL,
+    });
+    expect(withStripe.stripePriceOverrides?.core).toBe("price_test_core");
+    expect(withStripe.stripeSecretKey).toBe("sk_live_not_a_real_key");
+  });
 });

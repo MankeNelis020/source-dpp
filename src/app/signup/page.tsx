@@ -1,27 +1,45 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/infrastructure/auth/supabase/browser";
 import { signupAuthErrorMessage } from "@/infrastructure/auth/supabase/pkce";
 import { SourceButton } from "@/components/source/ui";
 import { AuthChrome, AuthField } from "@/components/source/auth-chrome";
 import { api } from "@/client/source/api";
 import { authEmailRedirectTo } from "@/lib/source/auth-origin";
+import { billingPlanById, parseBillingPlanId, SELECTED_PLAN_STORAGE_KEY } from "@/domain/billing/plans";
 
-export default function SignupPage() {
+function rememberPlanFromQuery(raw: string | null) {
+  const planId = parseBillingPlanId(raw);
+  if (!planId) return;
+  try {
+    sessionStorage.setItem(SELECTED_PLAN_STORAGE_KEY, planId);
+  } catch {
+    /* ignore */
+  }
+}
+
+function SignupForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const selectedPlan = parseBillingPlanId(searchParams.get("plan"));
+
+  useEffect(() => {
+    rememberPlanFromQuery(searchParams.get("plan"));
+  }, [searchParams]);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     setPending(true);
     setError(null);
     try {
+      rememberPlanFromQuery(searchParams.get("plan"));
       const config = await api<{ identityProvider: "supabase" | "test"; appPublicUrl?: string | null }>(
         "/api/auth/config"
       );
@@ -52,10 +70,16 @@ export default function SignupPage() {
     }
   }
 
+  const plan = selectedPlan ? billingPlanById(selectedPlan) : undefined;
+
   return (
     <AuthChrome
       title="Create your SOURCE workspace"
-      description="Start with the product data you already have. We'll find what's missing."
+      description={
+        plan
+          ? `Selected plan: ${plan.name} (${plan.priceLabel}${plan.cadence}). Start with the product data you already have.`
+          : "Start with the product data you already have. We'll find what's missing."
+      }
     >
       <form className="space-y-4" onSubmit={(event) => void onSubmit(event)}>
         <AuthField label="Work email" type="email" autoComplete="email" required value={email} onChange={setEmail} />
@@ -94,5 +118,13 @@ export default function SignupPage() {
         </Link>
       </p>
     </AuthChrome>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense fallback={<div className="px-5 py-24 text-[13px] text-[#101A15]/50">Loading…</div>}>
+      <SignupForm />
+    </Suspense>
   );
 }

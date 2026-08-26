@@ -11,6 +11,8 @@ import type { ObjectStorage } from "@/infrastructure/storage/port";
 import { createRuntimeEmailProvider } from "@/infrastructure/email/factory";
 import type { EmailProvider } from "@/infrastructure/email/port";
 import { getSharedTestEmailProvider, resetSharedTestEmailProvider } from "@/infrastructure/email/test-provider";
+import { createRuntimeStripeBilling } from "@/infrastructure/billing/factory";
+import type { StripeBillingPort } from "@/infrastructure/billing/port";
 import {
   isNextBuildPhase,
   loadSourceEnvironment,
@@ -25,6 +27,9 @@ let objectStorage: ObjectStorage | undefined;
 let objectStorageOverride: ObjectStorage | undefined;
 let emailProvider: EmailProvider | undefined;
 let emailProviderOverride: EmailProvider | undefined;
+let stripeBilling: StripeBillingPort | undefined;
+let stripeBillingOverride: StripeBillingPort | undefined;
+let stripeBillingResolved = false;
 
 export function isPostgresConfigured(): boolean {
   if (isNextBuildPhase()) return false;
@@ -98,6 +103,29 @@ export function setRuntimeEmailProvider(provider: EmailProvider | undefined) {
   emailProviderOverride = provider;
 }
 
+export function getRuntimeStripeBilling(): StripeBillingPort | undefined {
+  if (stripeBillingOverride) return stripeBillingOverride;
+  if (stripeBillingResolved) return stripeBilling;
+  if (isNextBuildPhase()) {
+    stripeBillingResolved = true;
+    stripeBilling = undefined;
+    return undefined;
+  }
+  try {
+    stripeBilling = createRuntimeStripeBilling(loadSourceEnvironment());
+    stripeBillingResolved = true;
+    return stripeBilling;
+  } catch (error) {
+    bootError = error instanceof Error ? error : new SourceEnvironmentError("SOURCE runtime failed to start.");
+    throw bootError;
+  }
+}
+
+export function setRuntimeStripeBilling(adapter: StripeBillingPort | undefined) {
+  stripeBillingOverride = adapter;
+  stripeBillingResolved = true;
+}
+
 export function getRuntimeEvidenceStorage(): EvidenceStorage {
   return getMemoryEvidenceStorage();
 }
@@ -117,6 +145,9 @@ export function resetRuntimeForTests() {
   objectStorageOverride = undefined;
   emailProvider = undefined;
   emailProviderOverride = undefined;
+  stripeBilling = undefined;
+  stripeBillingOverride = undefined;
+  stripeBillingResolved = false;
   resetMemoryObjectStorage();
   resetSharedTestEmailProvider();
 }

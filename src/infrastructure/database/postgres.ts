@@ -20,6 +20,8 @@ import type {
 } from "@/server/source/types";
 import type {
   EvidenceObject,
+  OrganisationBillingRecord,
+  OrganisationBillingStatus,
   PersistencePort,
   SessionRecord,
   ShareableTrustCandidate,
@@ -999,6 +1001,46 @@ export class PostgresPersistence implements PersistencePort {
       identityMatched: true,
     }));
   }
+
+  async getOrganisationBilling(organisationId: string) {
+    return this.withTenant(organisationId, async (client) => {
+      const { rows } = await client.query("SELECT * FROM organisation_billing WHERE organisation_id = $1", [
+        organisationId,
+      ]);
+      return rows[0] ? mapOrganisationBilling(rows[0] as Record<string, unknown>) : undefined;
+    });
+  }
+
+  async saveOrganisationBilling(record: OrganisationBillingRecord) {
+    await this.q("SELECT upsert_organisation_billing($1,$2,$3,$4,$5,$6,$7::timestamptz,$8::timestamptz)", [
+      record.organisationId,
+      record.stripeCustomerId ?? null,
+      record.stripeSubscriptionId ?? null,
+      record.planId,
+      record.status,
+      record.priceId ?? null,
+      normalizeTimestamp(record.currentPeriodEnd),
+      requireTimestamp(record.updatedAt),
+    ]);
+  }
+
+  async findOrganisationBillingByCustomer(stripeCustomerId: string) {
+    const { rows } = await this.q("SELECT * FROM find_organisation_billing_by_customer($1)", [stripeCustomerId]);
+    return rows[0] ? mapOrganisationBilling(rows[0] as Record<string, unknown>) : undefined;
+  }
+
+  async insertStripeWebhookEvent(eventId: string, eventType: string, processedAt = new Date()) {
+    const { rows } = await this.q("SELECT insert_stripe_webhook_event($1,$2,$3::timestamptz) AS ok", [
+      eventId,
+      eventType,
+      processedAt.toISOString(),
+    ]);
+    return Boolean(rows[0]?.ok);
+  }
+
+  async deleteStripeWebhookEvent(eventId: string) {
+    await this.q("SELECT delete_stripe_webhook_event($1)", [eventId]);
+  }
 }
 
 function mapInvitation(row: Record<string, unknown>): OrganisationInvitation {
@@ -1135,5 +1177,18 @@ function mapProviderEvent(row: Record<string, unknown>): EmailProviderEventRecor
     eventType: String(row.event_type ?? row.eventType),
     occurredAt: requireTimestamp(row.occurred_at ?? row.occurredAt),
     processedAt: requireTimestamp(row.processed_at ?? row.processedAt),
+  };
+}
+
+function mapOrganisationBilling(row: Record<string, unknown>): OrganisationBillingRecord {
+  return {
+    organisationId: String(row.organisation_id ?? row.organisationId),
+    stripeCustomerId: (row.stripe_customer_id ?? row.stripeCustomerId) as string | undefined,
+    stripeSubscriptionId: (row.stripe_subscription_id ?? row.stripeSubscriptionId) as string | undefined,
+    planId: String(row.plan_id ?? row.planId),
+    status: String(row.status) as OrganisationBillingStatus,
+    priceId: (row.price_id ?? row.priceId) as string | undefined,
+    currentPeriodEnd: normalizeTimestamp(row.current_period_end ?? row.currentPeriodEnd) ?? undefined,
+    updatedAt: requireTimestamp(row.updated_at ?? row.updatedAt),
   };
 }

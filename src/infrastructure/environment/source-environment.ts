@@ -74,6 +74,15 @@ export interface SourceEnvironment {
   outboxBatchSize?: number;
   outboxMaxAttempts?: number;
   cronSecret?: string;
+  /**
+   * Server-only Stripe secret key. Never NEXT_PUBLIC_. Never log.
+   * Optional: checkout and webhooks fail closed when unset.
+   */
+  stripeSecretKey?: string;
+  stripePublishableKey?: string;
+  stripeWebhookSecret?: string;
+  salesEmail?: string;
+  stripePriceOverrides?: Partial<Record<"free" | "core" | "growth" | "pro" | "premium", string>>;
 }
 
 export type EnvMap = Record<string, string | undefined>;
@@ -117,6 +126,11 @@ export function loadSourceEnvironment(
   const emailMode = resolveEmailMode(runtime, env);
   const emailProvider = resolveEmailProvider(runtime, env, emailMode);
   const supabaseDbCaCert = decodePemEnv(env.SUPABASE_DB_CA_CERT);
+  const stripeSecretKey = trim(env.STRIPE_SECRET_KEY);
+  const stripePublishableKey = trim(env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) ?? trim(env.STRIPE_PUBLISHABLE_KEY);
+  const stripeWebhookSecret = trim(env.STRIPE_WEBHOOK_SECRET);
+  const salesEmail = trim(env.SOURCE_SALES_EMAIL);
+  const stripePriceOverrides = parseStripePriceOverrides(env);
 
   assertProjectIsolation({
     runtime,
@@ -175,6 +189,11 @@ export function loadSourceEnvironment(
       outboxBatchSize,
       outboxMaxAttempts,
       cronSecret,
+      stripeSecretKey,
+      stripePublishableKey,
+      stripeWebhookSecret,
+      salesEmail,
+      stripePriceOverrides,
     };
   }
 
@@ -235,6 +254,8 @@ export function loadSourceEnvironment(
     assertHostedPostgresTls(supabaseDbCaCert);
   }
 
+  assertStripePolicy({ runtime, stripeSecretKey, stripeWebhookSecret });
+
   if (objectStorage === "supabase") {
     if (!supabaseUrl) {
       throw new SourceEnvironmentError(
@@ -290,6 +311,11 @@ export function loadSourceEnvironment(
     outboxBatchSize,
     outboxMaxAttempts,
     cronSecret,
+    stripeSecretKey,
+    stripePublishableKey,
+    stripeWebhookSecret,
+    salesEmail,
+    stripePriceOverrides,
   };
 }
 
@@ -457,6 +483,36 @@ function assertEmailPolicy(input: {
       );
     }
   }
+}
+
+function assertStripePolicy(input: {
+  runtime: RuntimeEnvironment;
+  stripeSecretKey?: string;
+  stripeWebhookSecret?: string;
+}) {
+  if (!input.stripeSecretKey) return;
+  if ((input.runtime === "preview" || input.runtime === "production") && !input.stripeWebhookSecret) {
+    throw new SourceEnvironmentError(
+      "SOURCE environment configuration mismatch: STRIPE_WEBHOOK_SECRET is required when STRIPE_SECRET_KEY is set."
+    );
+  }
+}
+
+function parseStripePriceOverrides(
+  env: EnvMap
+): Partial<Record<"free" | "core" | "growth" | "pro" | "premium", string>> | undefined {
+  const overrides: Partial<Record<"free" | "core" | "growth" | "pro" | "premium", string>> = {};
+  const free = trim(env.SOURCE_STRIPE_PRICE_FREE);
+  const core = trim(env.SOURCE_STRIPE_PRICE_CORE);
+  const growth = trim(env.SOURCE_STRIPE_PRICE_GROWTH);
+  const pro = trim(env.SOURCE_STRIPE_PRICE_PRO);
+  const premium = trim(env.SOURCE_STRIPE_PRICE_PREMIUM);
+  if (free) overrides.free = free;
+  if (core) overrides.core = core;
+  if (growth) overrides.growth = growth;
+  if (pro) overrides.pro = pro;
+  if (premium) overrides.premium = premium;
+  return Object.keys(overrides).length ? overrides : undefined;
 }
 
 function parseEmailList(raw: string | undefined): string[] {

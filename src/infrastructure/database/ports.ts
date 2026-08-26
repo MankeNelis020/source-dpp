@@ -59,6 +59,28 @@ export interface ShareableTrustCandidate {
   visibility?: VisibilityPolicy | LegacyVisibility;
 }
 
+export type OrganisationBillingStatus =
+  | "none"
+  | "incomplete"
+  | "incomplete_expired"
+  | "trialing"
+  | "active"
+  | "past_due"
+  | "canceled"
+  | "unpaid"
+  | "paused";
+
+export interface OrganisationBillingRecord {
+  organisationId: string;
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
+  planId: string;
+  status: OrganisationBillingStatus;
+  priceId?: string;
+  currentPeriodEnd?: string;
+  updatedAt: string;
+}
+
 export type MaybePromise<T> = T | Promise<T>;
 
 export interface PersistencePort {
@@ -148,6 +170,12 @@ export interface PersistencePort {
     subjectId: string;
     propertyId: string;
   }): MaybePromise<ShareableTrustCandidate[]>;
+
+  getOrganisationBilling(organisationId: string): MaybePromise<OrganisationBillingRecord | undefined>;
+  saveOrganisationBilling(record: OrganisationBillingRecord): MaybePromise<void>;
+  findOrganisationBillingByCustomer(stripeCustomerId: string): MaybePromise<OrganisationBillingRecord | undefined>;
+  insertStripeWebhookEvent(eventId: string, eventType: string, processedAt?: Date): MaybePromise<boolean>;
+  deleteStripeWebhookEvent(eventId: string): MaybePromise<void>;
 }
 
 export interface WorkflowScheduler {

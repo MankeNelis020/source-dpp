@@ -4,7 +4,7 @@ import { createSeedState, emptyState, hydrateEngineState } from "@/domain/source
 import { hashToken, hashesEqual } from "@/infrastructure/crypto/tokens";
 import type { OutboxRecord, OutboxStatus } from "@/infrastructure/outbox/types";
 import { PORTAL_ALLOWED_DEFAULT, type ImportJob, type ImportJobEvent, type ImportMappingProfile, type ImmutableAuditEvent, type IdentityCommandRecord, type Membership, type Organisation, type OrganisationInvitation, type ProcessedCommand, type SupplierPortalGrant, type UserRecord } from "@/server/source/types";
-import type { EvidenceObject, PersistencePort, SessionRecord, ShareableTrustCandidate, StorageObjectRecord } from "./ports";
+import type { EvidenceObject, OrganisationBillingRecord, PersistencePort, SessionRecord, ShareableTrustCandidate, StorageObjectRecord } from "./ports";
 import { normalizeTimestamp, requireTimestamp } from "./timestamps";
 import type { EmailProviderEventRecord, InboundCorrelationRecord, InboundEmailEventRecord, OutboundMessageRecord } from "@/infrastructure/email/transport";
 
@@ -127,6 +127,8 @@ export class MemoryPersistence implements PersistencePort {
   sessions = new Map<string, SessionRecord>();
   invitations = new Map<string, OrganisationInvitation>();
   identityCommands = new Map<string, IdentityCommandRecord>();
+  organisationBilling = new Map<string, OrganisationBillingRecord>();
+  stripeWebhookEvents = new Map<string, { eventId: string; eventType: string; processedAt: string }>();
   seq = 1;
   private chain: Promise<unknown> = Promise.resolve();
 
@@ -237,6 +239,8 @@ export class MemoryPersistence implements PersistencePort {
     this.sessions.clear();
     this.invitations.clear();
     this.identityCommands.clear();
+    this.organisationBilling.clear();
+    this.stripeWebhookEvents.clear();
     this.seq = 1000;
   }
 
@@ -592,6 +596,37 @@ export class MemoryPersistence implements PersistencePort {
       }
     }
     return out;
+  }
+
+  getOrganisationBilling(organisationId: string) {
+    const row = this.organisationBilling.get(organisationId);
+    return row ? { ...row } : undefined;
+  }
+
+  saveOrganisationBilling(record: OrganisationBillingRecord) {
+    const existing = this.organisationBilling.get(record.organisationId);
+    this.organisationBilling.set(record.organisationId, {
+      ...existing,
+      ...record,
+      stripeCustomerId: record.stripeCustomerId ?? existing?.stripeCustomerId,
+      stripeSubscriptionId: record.stripeSubscriptionId ?? existing?.stripeSubscriptionId,
+      priceId: record.priceId ?? existing?.priceId,
+      currentPeriodEnd: record.currentPeriodEnd ?? existing?.currentPeriodEnd,
+    });
+  }
+
+  findOrganisationBillingByCustomer(stripeCustomerId: string) {
+    return [...this.organisationBilling.values()].find((row) => row.stripeCustomerId === stripeCustomerId);
+  }
+
+  insertStripeWebhookEvent(eventId: string, eventType: string, processedAt = new Date()) {
+    if (this.stripeWebhookEvents.has(eventId)) return false;
+    this.stripeWebhookEvents.set(eventId, { eventId, eventType, processedAt: processedAt.toISOString() });
+    return true;
+  }
+
+  deleteStripeWebhookEvent(eventId: string) {
+    this.stripeWebhookEvents.delete(eventId);
   }
 }
 

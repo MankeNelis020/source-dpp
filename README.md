@@ -10,6 +10,8 @@ See `docs/architecture/storage.md` for private import and evidence files.
 See `docs/architecture/supplier-loop.md` for the manufacturer → supplier path.
 See `docs/operations/hosted-smoke-test.md` for `npm run smoke:preview`.
 
+Paid plans (Core / Growth / Pro / Premium) use Stripe Checkout. Set `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` in Vercel from the EarthGND Stripe account. Do not commit secret keys. The webhook URL is `{NEXT_PUBLIC_SOURCE_APP_URL}/api/webhooks/stripe`. Enterprise has no Price ID — the pricing page uses Contact sales.
+
 ```bash
 npm install
 npm run dev
@@ -22,7 +24,8 @@ Open [http://localhost:3000](http://localhost:3000).
 | Path | What |
 |---|---|
 | `/` | Public homepage |
-| `/product` `/how-it-works` `/suppliers` `/pricing` `/developers` | Marketing pages |
+| `/product` `/how-it-works` `/suppliers` `/developers` | Marketing pages |
+| `/pricing` `/pricing/success` | Plans and Stripe Checkout return |
 | `/signup` `/login` `/verify-email` `/forgot-password` `/onboarding/organisation` | Auth and first organisation |
 | `/app` | Manufacturer workspace (empty until you import) |
 | `/app/import` | Upload catalogue |
