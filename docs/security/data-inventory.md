@@ -16,6 +16,16 @@ Retention: operational for the life of the organisation. Organisation/user delet
 
 ---
 
+## Billing
+
+Where stored: Postgres `organisation_billing` (plan, subscription status, Stripe customer/subscription ids, period end) and `stripe_webhook_events` (Stripe event id for idempotency). Checkout Sessions are created in Stripe; SOURCE does not store card numbers.
+
+Access: organisation members can read plan status. `organisation:manage` (Owner/Admin) can start Checkout or Customer Portal. Webhook updates are signature-verified (`STRIPE_WEBHOOK_SECRET`). Price IDs are allowlisted in `src/domain/billing/plans.ts`; the client cannot pass an arbitrary Price ID.
+
+Retention: operational for the life of the organisation. Stripe secret keys are environment-only and must never be logged.
+
+---
+
 ## Import source files
 
 Where stored: Supabase Storage private bucket `source-imports`, plus `storage_objects` and `import_jobs` in Postgres.

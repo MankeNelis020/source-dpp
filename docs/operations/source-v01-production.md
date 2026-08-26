@@ -93,6 +93,10 @@ Classify every variable before placing it in Vercel Production.
 | `SOURCE_STORAGE_SIGNING_SECRET` | Memory/local HMAC; not required when Storage is Supabase |
 | `SOURCE_INBOUND_WEBHOOK_SECRET` | Leave unset for v0.1 (inbound 401) |
 | `SOURCE_INBOUND_REPLY_DOMAIN` | Leave unset for v0.1 |
+| `STRIPE_SECRET_KEY` | EarthGND Stripe secret key. Checkout is 503 until set. Never `NEXT_PUBLIC_` |
+| `STRIPE_WEBHOOK_SECRET` | Required in preview/production when `STRIPE_SECRET_KEY` is set. Endpoint `/api/webhooks/stripe` |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Same account publishable key |
+| `SOURCE_SALES_EMAIL` | Enterprise contact-sales mailbox |
 
 ### PREVIEW_ONLY
 

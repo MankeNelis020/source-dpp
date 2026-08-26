@@ -114,6 +114,11 @@ Local explicit Postgres: `SOURCE_PERSISTENCE=postgres` plus `SOURCE_APP_DATABASE
 | `SOURCE_OUTBOX_MAX_ATTEMPTS` | Worker | Default `5`. |
 | `SOURCE_PERSISTENCE` | Local only | `memory` \| `postgres`. Rejected in preview/production if `memory`. |
 | `SOURCE_PG_POOL_MAX` | Application runtime | Optional pg pool size. Default `3`. |
+| `STRIPE_SECRET_KEY` | Checkout / webhook | Server-only. EarthGND Stripe account API key (not org-view). Optional: checkout returns 503 until set. Never log. |
+| `STRIPE_PUBLISHABLE_KEY` or `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Optional | Publishable key from the same account. Checkout redirect does not require it. |
+| `STRIPE_WEBHOOK_SECRET` | `/api/webhooks/stripe` | Signing secret. Required in preview/production **when** `STRIPE_SECRET_KEY` is set. |
+| `SOURCE_SALES_EMAIL` | Pricing | Optional Enterprise "Contact sales" mailto. |
+| `SOURCE_STRIPE_PRICE_FREE` / `_CORE` / `_GROWTH` / `_PRO` / `_PREMIUM` | Checkout | Optional Price ID overrides (Stripe test mode). Defaults are the live EarthGND catalog IDs in `src/domain/billing/plans.ts`. |
 
 Do not use a single generic `DATABASE_URL` for both privilege levels in preview/production.
 
@@ -150,6 +155,9 @@ SOURCE_EVIDENCE_BUCKET=source-evidence
 SOURCE_SIGNED_READ_TTL_SECONDS=300
 CRON_SECRET=<preview secret>
 SOURCE_EMAIL_MODE=test
+STRIPE_SECRET_KEY=<EarthGND account secret key>
+STRIPE_WEBHOOK_SECRET=<webhook signing secret for this Preview URL>
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=<EarthGND publishable key>
 ```
 
 `SOURCE_MIGRATOR_DATABASE_URL` belongs in the migrate/deploy job, not necessarily in the serverless runtime.
@@ -176,6 +184,9 @@ SOURCE_EMAIL_PROVIDER=resend
 RESEND_API_KEY=<production Resend key>
 RESEND_WEBHOOK_SECRET=<production webhook secret>
 SOURCE_EMAIL_FROM=<verified production sender>
+STRIPE_SECRET_KEY=<EarthGND account secret key>
+STRIPE_WEBHOOK_SECRET=<webhook signing secret for /api/webhooks/stripe>
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=<EarthGND publishable key>
 ```
 
 Again: migrator DSN in the migrate job only.
@@ -332,6 +343,7 @@ Migrations create `source_app` and RLS when applied with migrator credentials. A
 10. Put **this environment's** `SUPABASE_SERVICE_ROLE_KEY` in Vercel (Preview key from preview project, Production key from production project). Never mix.
 11. Create private buckets `source-imports` and `source-evidence` (`npm run storage:bootstrap` or dashboard). They must not be public.
 12. Place Resend keys, webhook secret, From address, and `CRON_SECRET` per environment. Preview stays `SOURCE_EMAIL_MODE=test` unless an allow list is intentional. See `docs/operations/email.md`.
+13. Place **this environment's** Stripe keys from the EarthGND Stripe account (Developers → API keys), not the Source-dpp org-view. Add `STRIPE_WEBHOOK_SECRET` for `https://<app>/api/webhooks/stripe` (`checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`). Do not paste secret keys into git or chat.
 
 Until hosted Resend credentials and a verified domain exist, CI uses `TestEmailProvider`. Live preview/production sending is blocked on that human placement — not on application code.
 
